@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import zipfile
+import random
 
 import cv2
 import numpy as np
@@ -22,10 +23,15 @@ import utils
 
 
 def res_down():
+    # inputs = Input(shape=(255, 255, 3))
     inputs = Input(shape=(None, None, 3))
     rn50 = keras.applications.ResNet50(include_top=False, input_tensor=inputs)
+    # rn50.summary()
+    # exit()
+    '''
     for layer in rn50.layers:           # 需要训练吗？
         layer.trainable = False
+    '''
     feature = rn50.layers[-95].output  # 只需要前三层, -33?
     feature = Conv2D(256, kernel_size=1, use_bias=False)(feature)
     feature = BatchNormalization()(feature)
@@ -90,12 +96,11 @@ def select_mask_logistic_loss(true, pred):
     print('a', pred.shape, true.shape)
     pred = K.reshape(pred, (-1, 17, 17, 127 * 127))
 
-    # true = K.reshape(true, (-1, 255, 255, 1))
+    true = K.reshape(true, (-1, 255, 255, 1))
     print('e', pred.shape, true.shape)
     true = tf.compat.v1.extract_image_patches(true, ksizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
     print('b', pred.shape, true.shape)
-    # true = tf.image.extract_patches(true, (127, 127), 8, )
-    weight = K.sum(true, axis=-1, keepdims=True)
+    weight = K.mean(true, axis=-1, keepdims=True)
     print('weight.shape:', weight.shape)
     true = (true * 2) - 1
     loss = K.log(1 + K.exp(-pred * true)) * weight
@@ -118,7 +123,7 @@ class Dataset:
 
     def __init__(self, fn='train.zip'):
         self.zf = zipfile.ZipFile(fn)
-        with self.zf.open('train/meta.json') as fp:
+        with open('meta.json') as fp:
             self.meta = json.load(fp)
 
     def preprocess_inputs(self, mask):
@@ -127,40 +132,57 @@ class Dataset:
         return mask
 
     def _generator(self):
-        for path, data in self.meta['videos'].items():
-            frames = set()
-            for obj in data['objects'].values():
-                frames.update(obj['frames'])
-            for frame in frames:
-                ifn = f'train/JPEGImages/{path}/{frame}.jpg'
-                ofn = f'train/Annotations/{path}/{frame}.png'
-                with self.zf.open(ifn) as fp:
-                    im = utils.imdecode(fp)
-                with self.zf.open(ofn) as fp:
-                    mask = utils.imdecode(fp, 0)
-                for c in np.unique(mask):
-                    if c == 0:
-                        continue
-                    y = mask == c
-                    y.dtype = 'uint8'
-                    bbox = utils.find_bbox(y)
-                    if not bbox:
-                        continue
-                    x = utils.get_object(im, bbox, 255).astype('float32')
-                    y = utils.get_object(y, bbox, 127)
-                    x.shape = (1,) + x.shape
-                    y.shape = (1,) + y.shape + (1,)
-                    # 1, 255, 255, 3   1, 127, 127, 1
-                    yield [x[:, 64:-64, 64:-64].copy(), x], y.astype('float32')
+        for corps in self.meta:
+            path = corps['path']
+            color = corps['color']
+
+            frame = random.choice(corps['fns'])
+            fn = f'train/Annotations/{path}/{frame}.png'
+            with self.zf.open(fn) as fp:
+                im = utils.imdecode(fp, 0)
+            bbox = utils.find_bbox((im == color).astype('uint8'))
+            fn = f'train/JPEGImages/{path}/{frame}.jpg'
+            with self.zf.open(fn) as fp:
+                im = utils.imdecode(fp)
+            template = utils.get_object(im, bbox, 127).astype('float32')
+
+            frame = random.choice(corps['fns'])
+            fn = f'train/Annotations/{path}/{frame}.png'
+            with self.zf.open(fn) as fp:
+                im = utils.imdecode(fp, 0)
+            mask = im == color
+            mask.dtype = 'uint8'
+            bbox = utils.find_bbox(mask)
+            mask = utils.get_object(mask, bbox, 255).astype('float32')
+            fn = f'train/JPEGImages/{path}/{frame}.jpg'
+            with self.zf.open(fn) as fp:
+                im = utils.imdecode(fp)
+            search = utils.get_object(im, bbox, 255).astype('float32')
+
+            template /= 255
+            search /= 255
+            template.shape = (1,) + template.shape
+            search.shape = (1,) + search.shape
+            mask.shape = (1,) + mask.shape + (1,)
+
+            yield (template, search), mask
 
     def generator(self):
         while True:
             yield from self._generator()
 
+    def demo(self):
+        for (t, s), m in self.generator():
+            cv2.imwrite('t.jpg', (t[0] * 255).astype('uint8'))
+            cv2.imwrite('s.jpg', (s[0] * 255).astype('uint8'))
+            cv2.imwrite('m.jpg', (m[0] * 255).astype('uint8'))
+            exit()
+
 
 def mlearn():
     version = '1.0.0'
     dataset = Dataset()
+    # dataset.demo()
     xy_train = dataset.generator()
     xy_test = dataset.generator()
     model = build_model()
@@ -169,10 +191,10 @@ def mlearn():
     model.compile(optimizer='rmsprop',
                   loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=29500,
+                        steps_per_epoch=1000,
                         epochs=20,
                         validation_data=xy_test,
-                        validation_steps=500,
+                        validation_steps=100,
                         callbacks=[mcp])
     model.save(f'weights.{version}.h5', include_optimizer=False)
     result = model.evaluate_generator(xy_test, steps=500)
@@ -180,5 +202,20 @@ def mlearn():
     predict(version)
 
 
+def main(template, search):
+    print(template.shape, search.shape)
+    template = utils.preprocess_input(template)
+    search = utils.preprocess_input(search)
+    print(template.shape, search.shape)
+    model = keras.models.load_model('weights.001.h5', {'DepthwiseConv2D': DepthwiseConv2D}, compile=False)
+    masks = model.predict([template, search])
+    np.save('masks.npy', masks)
+
+
 if __name__ == '__main__':
-    mlearn()
+    if len(sys.argv) > 2:
+        template = cv2.imread(sys.argv[1])
+        search = cv2.imread(sys.argv[2])
+        main(template, search)
+    else:
+        mlearn()

@@ -48,11 +48,18 @@ def imshow(winname, mat):
 
 def get_object(image, bbox, size=512, q=1.00):
     x, y, w, h = corner2center(bbox)
-    scaling = size / ((w + q * (w + h)) * (h + q * (w + h))) ** 0.5
+    scaling = 255 / ((w + q * (w + h)) * (h + q * (w + h))) ** 0.5
     mapping = np.array([[scaling, 0, (-x * scaling + size / 2)],
                         [0, scaling, (-y * scaling + size / 2)]], dtype='float')
     crop = cv2.warpAffine(image, mapping, (size, size))
     return crop
+
+
+def preprocess_input(im):
+    x = np.array(im, dtype='float32')
+    x /= 255
+    x.shape = (1,) + x.shape
+    return x
 
 
 if __name__ == '__main__':
