@@ -46,12 +46,12 @@ def imshow(winname, mat):
     cv2.imshow(winname, mat)
 
 
-def get_object(image, bbox, size=512, q=1.00):
+def get_object(image, bbox, size=255, q=0.50):
     x, y, w, h = corner2center(bbox)
-    scaling = 255 / ((w + q * (w + h)) * (h + q * (w + h))) ** 0.5
+    scaling = 127 / ((w + q * (w + h)) * (h + q * (w + h))) ** 0.5
     mapping = np.array([[scaling, 0, (-x * scaling + size / 2)],
                         [0, scaling, (-y * scaling + size / 2)]], dtype='float')
-    crop = cv2.warpAffine(image, mapping, (size, size))
+    crop = cv2.warpAffine(image, mapping, (size, size), borderValue=image.mean(axis=(0, 1)))
     return crop
 
 
@@ -63,16 +63,9 @@ def preprocess_input(im):
 
 
 if __name__ == '__main__':
-    mask = cv2.imread('00020.png', 0)
-    im = cv2.imread('00020.jpg')
-    rect = find_bbox(mask)
-    # x, y, _, _ = corner2center(rect)
-    # x, y = get_rect_sub_pix(im, im, rect)
-    # cv2.imshow('s', im)
-    # im = get_rect_sub_pix_ex(im, (512, 512), (x, y))
-    im = get_object(im, rect)
-    mask = get_object(mask, rect)
-    # x = warp_affine(im, rect, )
+    rect = 298, 107, 298 + 164, 107 + 256
+    print(rect)
+    im = cv2.imread('../im.jpg')
+    im = get_object(im, rect, size=255, q=0.5)
     cv2.imshow('im', im)
-    cv2.imshow('mask', mask)
     cv2.waitKey()
