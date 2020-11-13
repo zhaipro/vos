@@ -45,6 +45,8 @@ class DepthwiseConv2D(Layer):
     def call(self, inputs):
         x, kernel = inputs
 
+        # kernel = kernel[:, 4:-4, 4:-4]
+
         n, xh, xw, c = x.shape
         x = tf.transpose(x, (1, 2, 0, 3))
         x = K.reshape(x, (1, xh, xw, -1))
@@ -100,10 +102,14 @@ def select_mask_logistic_loss(true, pred):
     print('e', pred.shape, true.shape)
     true = tf.compat.v1.extract_image_patches(true, ksizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
     print('b', pred.shape, true.shape)
-    weight = K.mean(true, axis=-1, keepdims=True)
+    weight = K.mean(true, axis=-1)
     print('weight.shape:', weight.shape)
     true = (true * 2) - 1
-    loss = K.log(1 + K.exp(-pred * true)) * weight
+    loss = K.log(1 + K.exp(-pred * true))
+    loss = K.mean(loss, axis=-1)
+    loss = loss * weight
+    loss = K.sum(loss) / K.sum(weight)
+    # loss = K.log(1 + K.exp(-pred[:, 8, 8] * true[:, 8, 8]))
     print('loss:', loss.shape)
     return loss
 
@@ -135,6 +141,8 @@ class Dataset:
         for corps in self.meta:
             path = corps['path']
             color = corps['color']
+            fake = random.random() < 0.3
+            fake = False
 
             frame = random.choice(corps['fns'])
             fn = f'train/Annotations/{path}/{frame}.png'
@@ -145,6 +153,12 @@ class Dataset:
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
             template = utils.get_object(im, bbox, 127).astype('float32')
+
+            if fake:
+                idx = random.randint(0, len(self.meta) - 1)
+                corps = self.meta[idx]
+                path = corps['path']
+                color = corps['color']
 
             frame = random.choice(corps['fns'])
             fn = f'train/Annotations/{path}/{frame}.png'
@@ -158,6 +172,14 @@ class Dataset:
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
             search = utils.get_object(im, bbox, 255).astype('float32')
+
+            if fake:
+                mask[:] = 0
+
+            # cv2.imwrite('search.jpg', search)
+            # cv2.imwrite('mask.jpg', mask * 255)
+            # cv2.imwrite('template.jpg', template)
+            # exit()
 
             template /= 255
             search /= 255
@@ -191,8 +213,8 @@ def mlearn():
     model.compile(optimizer='rmsprop',
                   loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=1000,
-                        epochs=20,
+                        steps_per_epoch=2000,
+                        epochs=40,
                         validation_data=xy_test,
                         validation_steps=100,
                         callbacks=[mcp])
@@ -207,7 +229,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.001.h5', {'DepthwiseConv2D': DepthwiseConv2D}, compile=False)
+    model = keras.models.load_model('weights.012.h5', {'DepthwiseConv2D': DepthwiseConv2D}, compile=False)
     masks = model.predict([template, search])
     np.save('masks.npy', masks)
 
