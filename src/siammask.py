@@ -10,6 +10,7 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, concatenate
 from tensorflow.keras.layers import Conv2D, Input, Activation, UpSampling2D, Dropout
 from tensorflow.keras.layers import Reshape
+from tensorflow.keras.layers import Add
 from tensorflow.keras.losses import binary_crossentropy
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Layer
@@ -84,6 +85,98 @@ def depth_corr(kernel, search, out_channels):
 
 def mask_corr(template, search):
     return depth_corr(template, search, 63 ** 2)
+
+
+
+
+
+
+
+def refine(features, corr_feature):
+    p0, p1, p2 = features
+    p3 = Reshape((1, 1, 256))(corr_feature)
+    out = Conv2DTranspose(32, 15, strides=15)(p3)
+    h2 = Conv2d(32, 3, padding='same', activation='relu')(out)
+    h2 = Conv2d(32, 3, padding='same', activation='relu')(h2)
+    p2 = Conv2d(128, 3, padding='same', activation='relu')(p2)
+    p2 = Conv2d(32, 3, padding='same', activation='relu')(p2)
+    out = Add()([h2, p2])
+    out = tf.image.resize(out, [31, 31])
+    out = Conv2d(16, 3, padding='same')(out)
+
+    h1 = Conv2d(16, 3, padding='same', activation='relu')(out)
+    h1 = Conv2d(16, 3, padding='same', activation='relu')(h1)
+    p1 = Conv2d(64, 3, padding='same', activation='relu')(p1)
+    p1 = Conv2d(16, 3, padding='same', activation='relu')(p1)
+    out = Add()([h1, p1])
+    out = tf.image.resize(out, [61, 61])
+    out = Conv2d(4, 3, padding='same')(out)
+
+    h0 = Conv2d(4, 3, padding='same', activation='relu')(out)
+    h0 = Conv2d(4, 3, padding='same', activation='relu')(h1)
+    p0 = Conv2d(16, 3, padding='same', activation='relu')(p0)
+    p0 = Conv2d(4, 3, padding='same', activation='relu')(p0)
+    out = Add()([h0, p0])
+    out = tf.image.resize(out, [127, 127])
+    out = Conv2d(1, 3, padding='same')(out)
+    out = Reshape((127 * 127))(out)
+
+    '''
+    def __init__(self):
+        super(Refine, self).__init__()
+        self.v0 = nn.Sequential(nn.Conv2d(64, 16, 3, padding=1), nn.ReLU(),
+                           nn.Conv2d(16, 4, 3, padding=1),nn.ReLU())
+
+        self.v1 = nn.Sequential(nn.Conv2d(256, 64, 3, padding=1), nn.ReLU(),
+                           nn.Conv2d(64, 16, 3, padding=1), nn.ReLU())
+
+        self.v2 = nn.Sequential(nn.Conv2d(512, 128, 3, padding=1), nn.ReLU(),
+                           nn.Conv2d(128, 32, 3, padding=1), nn.ReLU())
+
+        self.h2 = nn.Sequential(nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
+                           nn.Conv2d(32, 32, 3, padding=1), nn.ReLU())
+
+        self.h1 = nn.Sequential(nn.Conv2d(16, 16, 3, padding=1), nn.ReLU(),
+                           nn.Conv2d(16, 16, 3, padding=1), nn.ReLU())
+
+        self.h0 = nn.Sequential(nn.Conv2d(4, 4, 3, padding=1), nn.ReLU(),
+                           nn.Conv2d(4, 4, 3, padding=1), nn.ReLU())
+
+        self.deconv = nn.ConvTranspose2d(256, 32, 15, 15)
+
+        self.post0 = nn.Conv2d(32, 16, 3, padding=1)
+        self.post1 = nn.Conv2d(16, 4, 3, padding=1)
+        self.post2 = nn.Conv2d(4, 1, 3, padding=1)
+
+        for modules in [self.v0, self.v1, self.v2, self.h2, self.h1, self.h0, self.deconv, self.post0, self.post1, self.post2,]:
+            for l in modules.modules():
+                if isinstance(l, nn.Conv2d):
+                    nn.init.kaiming_uniform_(l.weight, a=1)
+
+    def forward(self, f, corr_feature, pos=None, test=False):
+        p0 = F.unfold(f[0], (61, 61), padding=0, stride=4).permute(0, 2, 1).contiguous().view(-1, 64, 61, 61)
+        if not (pos is None): p0 = torch.index_select(p0, 0, pos)
+        p1 = F.unfold(f[1], (31, 31), padding=0, stride=2).permute(0, 2, 1).contiguous().view(-1, 256, 31, 31)
+        if not (pos is None): p1 = torch.index_select(p1, 0, pos)
+        p2 = F.unfold(f[2], (15, 15), padding=0, stride=1).permute(0, 2, 1).contiguous().view(-1, 512, 15, 15)
+        if not (pos is None): p2 = torch.index_select(p2, 0, pos)
+
+        if not(pos is None):
+            p3 = corr_feature[:, :, pos[0], pos[1]].view(-1, 256, 1, 1)
+        else:
+            p3 = corr_feature.permute(0, 2, 3, 1).contiguous().view(-1, 256, 1, 1)
+
+        out = self.deconv(p3)
+        out = self.post0(F.upsample(self.h2(out) + self.v2(p2), size=(31, 31)))
+        out = self.post1(F.upsample(self.h1(out) + self.v1(p1), size=(61, 61)))
+        out = self.post2(F.upsample(self.h0(out) + self.v0(p0), size=(127, 127)))
+        out = out.view(-1, 127*127)
+        return out
+    '''
+
+
+
+
 
 
 def select_mask_logistic_loss(true, pred):
