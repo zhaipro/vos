@@ -20,19 +20,17 @@ from tensorflow import keras
 from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
 
 import utils
+import resnet
 
 
 def res_down():
-    # inputs = Input(shape=(255, 255, 3))
     inputs = Input(shape=(None, None, 3))
-    rn50 = keras.applications.ResNet50(include_top=False, input_tensor=inputs)
-    # rn50.summary()
-    # exit()
+    rn50 = resnet.ResNet50(input_tensor=inputs)
     '''
     for layer in rn50.layers:           # 需要训练吗？
         layer.trainable = False
     '''
-    feature = rn50.layers[-95].output  # 只需要前三层, -33?
+    feature = rn50.get_layer('conv4_block6_out').output
     feature = Conv2D(256, kernel_size=1, use_bias=False)(feature)
     feature = BatchNormalization()(feature)
     model = Model(inputs=inputs, outputs=feature)
@@ -137,8 +135,12 @@ class Dataset:
         mask.dtype = 'uint8'
         return mask
 
-    def _generator(self):
-        for corps in self.meta:
+    def _generator(self, is_train):
+        if is_train:
+            meta = self.meta[:-100]
+        else:
+            meta = self.meta[-100:]
+        for corps in meta:
             path = corps['path']
             color = corps['color']
             fake = random.random() < 0.3
@@ -189,9 +191,9 @@ class Dataset:
 
             yield (template, search), mask
 
-    def generator(self):
+    def generator(self, is_train=True):
         while True:
-            yield from self._generator()
+            yield from self._generator(is_train)
 
     def demo(self):
         for (t, s), m in self.generator():
@@ -206,7 +208,7 @@ def mlearn():
     dataset = Dataset()
     # dataset.demo()
     xy_train = dataset.generator()
-    xy_test = dataset.generator()
+    xy_test = dataset.generator(is_train=False)
     model = build_model()
     model.summary()
     mcp = ModelCheckpoint(filepath='weights.{epoch:03d}.h5')
