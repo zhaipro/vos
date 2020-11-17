@@ -132,4 +132,7 @@ datasets
 
 *.jpg
 *.png
+*.mp4
 *.h5
+*.npy
+*.pdf

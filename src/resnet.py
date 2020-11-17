@@ -147,9 +147,9 @@ def ResNet50(weights='imagenet',
 
     x = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                   name='conv1_bn')(x)
-    x = layers.Activation('relu', name='conv1_relu')(x)
+    p0 = layers.Activation('relu', name='conv1_relu')(x)
 
-    x = layers.ZeroPadding2D(padding=((1, 1), (1, 1)), name='pool1_pad')(x)
+    x = layers.ZeroPadding2D(padding=((1, 1), (1, 1)), name='pool1_pad')(p0)
     x = layers.MaxPooling2D(3, strides=2, name='pool1_pool')(x)
 
     p1 = stack1(x, 64, 3, stride1=1, name='conv2')

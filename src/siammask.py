@@ -9,8 +9,9 @@ import numpy as np
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, concatenate
 from tensorflow.keras.layers import Conv2D, Input, Activation, UpSampling2D, Dropout
-from tensorflow.keras.layers import Reshape
+# from tensorflow.keras.layers import Reshape
 from tensorflow.keras.layers import Add
+from tensorflow.keras.layers import Conv2DTranspose
 from tensorflow.keras.losses import binary_crossentropy
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Layer
@@ -31,10 +32,13 @@ def res_down():
     for layer in rn50.layers:           # 需要训练吗？
         layer.trainable = False
     '''
-    feature = rn50.get_layer('conv4_block6_out').output
-    feature = Conv2D(256, kernel_size=1, use_bias=False)(feature)
+    p0 = rn50.get_layer('conv1_relu').output
+    p1 = rn50.get_layer('conv2_block3_out').output
+    p2 = rn50.get_layer('conv3_block4_out').output
+    p3 = rn50.get_layer('conv4_block6_out').output
+    feature = Conv2D(256, kernel_size=1, use_bias=False)(p3)
     feature = BatchNormalization()(feature)
-    model = Model(inputs=inputs, outputs=feature)
+    model = Model(inputs=inputs, outputs=[p0, p1, p2, feature])
     return model
 
 
@@ -65,7 +69,7 @@ class DepthwiseConv2D(Layer):
         return None, None, None, 256
 
 
-def depth_corr(kernel, search, out_channels):
+def _depth_corr(kernel, search):
     kernel = Conv2D(256, kernel_size=3, use_bias=False)(kernel)
     kernel = BatchNormalization()(kernel)
     kernel = Activation('relu')(kernel)
@@ -75,11 +79,15 @@ def depth_corr(kernel, search, out_channels):
     search = Activation('relu')(search)
 
     feature = DepthwiseConv2D()([search, kernel])
+    return feature
+
+
+def depth_corr(kernel, search, out_channels):
+    feature = _depth_corr(kernel, search)
     feature = Conv2D(256, kernel_size=1, use_bias=False, name='conv2d')(feature)
     feature = BatchNormalization(name='batchnormalization')(feature)
     feature = Activation('relu')(feature)
     feature = Conv2D(out_channels, kernel_size=1)(feature)
-
     return feature
 
 
@@ -87,105 +95,82 @@ def mask_corr(template, search):
     return depth_corr(template, search, 63 ** 2)
 
 
+class Reshape(Layer):
 
+    def __init__(self, shape, **config):
+        self.shape = list(shape)
+        super().__init__(**config)
 
+    def call(self, inputs):
+        print('self.shape:', self.shape, type(self.shape))
+        return K.reshape(inputs, [-1] + self.shape)
 
+    # https://stackoverflow.com/questions/58678836/notimplementederror-layers-with-arguments-in-init-must-override-get-conf
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'shape': self.shape
+        })
+        return config
 
 
 def refine(features, corr_feature):
     p0, p1, p2 = features
+
+    print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
+    p0 = tf.compat.v1.extract_image_patches(p0, ksizes=(1, 64, 64, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p1 = tf.compat.v1.extract_image_patches(p1, ksizes=(1, 32, 32, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p2 = tf.compat.v1.extract_image_patches(p2, ksizes=(1, 16, 16, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
+    print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
+    p0 = Reshape((64, 64, 64))(p0)
+    p1 = Reshape((32, 32, 256))(p1)
+    p2 = Reshape((16, 16, 512))(p2)
+
+    print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
     p3 = Reshape((1, 1, 256))(corr_feature)
-    out = Conv2DTranspose(32, 15, strides=15)(p3)
-    h2 = Conv2d(32, 3, padding='same', activation='relu')(out)
-    h2 = Conv2d(32, 3, padding='same', activation='relu')(h2)
-    p2 = Conv2d(128, 3, padding='same', activation='relu')(p2)
-    p2 = Conv2d(32, 3, padding='same', activation='relu')(p2)
+    out = Conv2DTranspose(32, 16, strides=15)(p3)
+    h2 = Conv2D(32, 3, padding='same', activation='relu')(out)
+    h2 = Conv2D(32, 3, padding='same', activation='relu')(h2)
+    p2 = Conv2D(128, 3, padding='same', activation='relu')(p2)
+    p2 = Conv2D(32, 3, padding='same', activation='relu')(p2)
+    print('hahaha:', h2.shape, p2.shape)
     out = Add()([h2, p2])
-    out = tf.image.resize(out, [31, 31])
-    out = Conv2d(16, 3, padding='same')(out)
+    out = tf.image.resize(out, [32, 32])
+    out = Conv2D(16, 3, padding='same')(out)
 
-    h1 = Conv2d(16, 3, padding='same', activation='relu')(out)
-    h1 = Conv2d(16, 3, padding='same', activation='relu')(h1)
-    p1 = Conv2d(64, 3, padding='same', activation='relu')(p1)
-    p1 = Conv2d(16, 3, padding='same', activation='relu')(p1)
+    h1 = Conv2D(16, 3, padding='same', activation='relu')(out)
+    h1 = Conv2D(16, 3, padding='same', activation='relu')(h1)
+    p1 = Conv2D(64, 3, padding='same', activation='relu')(p1)
+    p1 = Conv2D(16, 3, padding='same', activation='relu')(p1)
     out = Add()([h1, p1])
-    out = tf.image.resize(out, [61, 61])
-    out = Conv2d(4, 3, padding='same')(out)
+    out = tf.image.resize(out, [64, 64])
+    out = Conv2D(4, 3, padding='same')(out)
 
-    h0 = Conv2d(4, 3, padding='same', activation='relu')(out)
-    h0 = Conv2d(4, 3, padding='same', activation='relu')(h1)
-    p0 = Conv2d(16, 3, padding='same', activation='relu')(p0)
-    p0 = Conv2d(4, 3, padding='same', activation='relu')(p0)
+    h0 = Conv2D(4, 3, padding='same', activation='relu')(out)
+    h0 = Conv2D(4, 3, padding='same', activation='relu')(h0)
+    p0 = Conv2D(16, 3, padding='same', activation='relu')(p0)
+    p0 = Conv2D(4, 3, padding='same', activation='relu')(p0)
+    print('hahaha:', h0.shape, p0.shape)
     out = Add()([h0, p0])
     out = tf.image.resize(out, [127, 127])
-    out = Conv2d(1, 3, padding='same')(out)
-    out = Reshape((127 * 127))(out)
+    out = Conv2D(1, 3, padding='same')(out)
 
-    '''
-    def __init__(self):
-        super(Refine, self).__init__()
-        self.v0 = nn.Sequential(nn.Conv2d(64, 16, 3, padding=1), nn.ReLU(),
-                           nn.Conv2d(16, 4, 3, padding=1),nn.ReLU())
+    print('out1.shape:', out.shape)
 
-        self.v1 = nn.Sequential(nn.Conv2d(256, 64, 3, padding=1), nn.ReLU(),
-                           nn.Conv2d(64, 16, 3, padding=1), nn.ReLU())
+    out = Reshape((127 * 127,))(out)
 
-        self.v2 = nn.Sequential(nn.Conv2d(512, 128, 3, padding=1), nn.ReLU(),
-                           nn.Conv2d(128, 32, 3, padding=1), nn.ReLU())
+    print('out.shape:', out.shape)
 
-        self.h2 = nn.Sequential(nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
-                           nn.Conv2d(32, 32, 3, padding=1), nn.ReLU())
-
-        self.h1 = nn.Sequential(nn.Conv2d(16, 16, 3, padding=1), nn.ReLU(),
-                           nn.Conv2d(16, 16, 3, padding=1), nn.ReLU())
-
-        self.h0 = nn.Sequential(nn.Conv2d(4, 4, 3, padding=1), nn.ReLU(),
-                           nn.Conv2d(4, 4, 3, padding=1), nn.ReLU())
-
-        self.deconv = nn.ConvTranspose2d(256, 32, 15, 15)
-
-        self.post0 = nn.Conv2d(32, 16, 3, padding=1)
-        self.post1 = nn.Conv2d(16, 4, 3, padding=1)
-        self.post2 = nn.Conv2d(4, 1, 3, padding=1)
-
-        for modules in [self.v0, self.v1, self.v2, self.h2, self.h1, self.h0, self.deconv, self.post0, self.post1, self.post2,]:
-            for l in modules.modules():
-                if isinstance(l, nn.Conv2d):
-                    nn.init.kaiming_uniform_(l.weight, a=1)
-
-    def forward(self, f, corr_feature, pos=None, test=False):
-        p0 = F.unfold(f[0], (61, 61), padding=0, stride=4).permute(0, 2, 1).contiguous().view(-1, 64, 61, 61)
-        if not (pos is None): p0 = torch.index_select(p0, 0, pos)
-        p1 = F.unfold(f[1], (31, 31), padding=0, stride=2).permute(0, 2, 1).contiguous().view(-1, 256, 31, 31)
-        if not (pos is None): p1 = torch.index_select(p1, 0, pos)
-        p2 = F.unfold(f[2], (15, 15), padding=0, stride=1).permute(0, 2, 1).contiguous().view(-1, 512, 15, 15)
-        if not (pos is None): p2 = torch.index_select(p2, 0, pos)
-
-        if not(pos is None):
-            p3 = corr_feature[:, :, pos[0], pos[1]].view(-1, 256, 1, 1)
-        else:
-            p3 = corr_feature.permute(0, 2, 3, 1).contiguous().view(-1, 256, 1, 1)
-
-        out = self.deconv(p3)
-        out = self.post0(F.upsample(self.h2(out) + self.v2(p2), size=(31, 31)))
-        out = self.post1(F.upsample(self.h1(out) + self.v1(p1), size=(61, 61)))
-        out = self.post2(F.upsample(self.h0(out) + self.v0(p0), size=(127, 127)))
-        out = out.view(-1, 127*127)
-        return out
-    '''
-
-
-
-
+    return out
 
 
 def select_mask_logistic_loss(true, pred):
     # return pred
     print('c', pred.shape, true.shape)
-    pred = K.reshape(pred, (-1, 63, 63, 1))
+    # pred = K.reshape(pred, (-1, 127, 127, 1))
     print('d', pred.shape, true.shape)
     # https://www.tensorflow.org/api_docs/python/tf/image/resize
-    pred = tf.image.resize(pred, [127, 127])
+    # pred = tf.image.resize(pred, [127, 127])
     print('a', pred.shape, true.shape)
     pred = K.reshape(pred, (-1, 17, 17, 127 * 127))
 
@@ -196,10 +181,11 @@ def select_mask_logistic_loss(true, pred):
     weight = K.mean(true, axis=-1)
     print('weight.shape:', weight.shape)
     true = (true * 2) - 1
+    pred = K.tanh(pred)
     loss = K.log(1 + K.exp(-pred * true))
     loss = K.mean(loss, axis=-1)
-    loss = loss * weight
-    loss = K.sum(loss) / K.sum(weight)
+    loss = K.mean(loss * weight)
+    # loss = K.sum(loss) / K.sum(weight)
     # loss = K.log(1 + K.exp(-pred[:, 8, 8] * true[:, 8, 8]))
     print('loss:', loss.shape)
     return loss
@@ -209,9 +195,10 @@ def build_model():
     template = Input(shape=(127, 127, 3))
     search = Input(shape=(255, 255, 3))
     features = res_down()
-    template_feature = features(template)
-    search_feature = features(search)
-    outputs = mask_corr(template_feature, search_feature)
+    template_feature = features(template)[3]
+    p0, p1, p2, search_feature = features(search)
+    corr_feature = _depth_corr(template_feature, search_feature)
+    outputs = refine((p0, p1, p2), corr_feature)
     model = Model(inputs=[template, search], outputs=outputs)
     return model
 
@@ -244,6 +231,7 @@ class Dataset:
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
             bbox = utils.find_bbox((im == color).astype('uint8'))
+            assert bbox is not None
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
@@ -262,6 +250,7 @@ class Dataset:
             mask = im == color
             mask.dtype = 'uint8'
             bbox = utils.find_bbox(mask)
+            assert bbox is not None
             mask = utils.get_object(mask, bbox, 255).astype('float32')
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
@@ -281,6 +270,8 @@ class Dataset:
             template.shape = (1,) + template.shape
             search.shape = (1,) + search.shape
             mask.shape = (1,) + mask.shape + (1,)
+
+            assert not np.isnan(template.sum())
 
             yield (template, search), mask
 
@@ -304,19 +295,19 @@ def mlearn():
     xy_test = dataset.generator(is_train=False)
     model = build_model()
     model.summary()
+    reduce_lr = ReduceLROnPlateau(verbose=1)
     mcp = ModelCheckpoint(filepath='weights.{epoch:03d}.h5')
     model.compile(optimizer='rmsprop',
                   loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=2000,
-                        epochs=40,
+                        steps_per_epoch=1000,
+                        epochs=80,
                         validation_data=xy_test,
                         validation_steps=100,
-                        callbacks=[mcp])
+                        callbacks=[reduce_lr, mcp])
     model.save(f'weights.{version}.h5', include_optimizer=False)
     result = model.evaluate_generator(xy_test, steps=500)
     print(result)
-    predict(version)
 
 
 def main(template, search):
@@ -324,12 +315,16 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.012.h5', {'DepthwiseConv2D': DepthwiseConv2D}, compile=False)
+    model = keras.models.load_model('weights.003.h5',
+        {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     np.save('masks.npy', masks)
 
 
 if __name__ == '__main__':
+    # model = build_model()
+    # model.summary()
+    # exit()
     if len(sys.argv) > 2:
         template = cv2.imread(sys.argv[1])
         search = cv2.imread(sys.argv[2])
