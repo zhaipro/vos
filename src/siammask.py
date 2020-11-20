@@ -12,7 +12,7 @@ from tensorflow.keras.layers import Conv2D, Input, Activation, UpSampling2D, Dro
 # from tensorflow.keras.layers import Reshape
 from tensorflow.keras.layers import Add
 from tensorflow.keras.layers import Conv2DTranspose
-from tensorflow.keras.losses import binary_crossentropy
+from tensorflow.keras.losses import binary_crossentropy, mean_squared_error
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Layer
 from tensorflow import keras
@@ -178,13 +178,15 @@ def select_mask_logistic_loss(true, pred):
     print('e', pred.shape, true.shape)
     true = tf.image.extract_patches(true, sizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
     print('b', pred.shape, true.shape)
-    weight = K.mean(true, axis=-1)
-    print('weight.shape:', weight.shape)
-    true = (true * 2) - 1
-    pred = K.tanh(pred)
-    loss = K.log(1 + K.exp(-pred * true))
-    loss = K.mean(loss, axis=-1)
-    loss = K.mean(loss * weight)
+    # weight = K.mean(true, axis=-1)
+    # print('weight.shape:', weight.shape)
+    # true = (true * 2) - 1
+    # pred = K.tanh(pred)
+    # loss = K.log(1 + K.exp(-pred * true))
+    pred = K.sigmoid(pred)
+    loss = binary_crossentropy(true, pred)
+    # loss = K.mean(loss, axis=-1)
+    # loss = K.mean(loss * weight)
     # loss = K.sum(loss) / K.sum(weight)
     # loss = K.log(1 + K.exp(-pred[:, 8, 8] * true[:, 8, 8]))
     print('loss:', loss.shape)
