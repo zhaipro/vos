@@ -46,11 +46,12 @@ def imshow(winname, mat):
     cv2.imshow(winname, mat)
 
 
-def get_object(image, bbox, size=255, q=0.50):
+def get_object(image, bbox, size=255, q=0.50, move=(0, 0)):
     x, y, w, h = corner2center(bbox)
     scaling = 127 / ((w + q * (w + h)) * (h + q * (w + h))) ** 0.5
-    mapping = np.array([[scaling, 0, (-x * scaling + size / 2)],
-                        [0, scaling, (-y * scaling + size / 2)]], dtype='float')
+    mx, my = move
+    mapping = np.array([[scaling, 0, (-x * scaling + size / 2 + mx)],
+                        [0, scaling, (-y * scaling + size / 2 + my)]], dtype='float')
     crop = cv2.warpAffine(image, mapping, (size, size), borderValue=image.mean(axis=(0, 1)))
     return crop
 
@@ -66,6 +67,7 @@ if __name__ == '__main__':
     rect = 298, 107, 298 + 164, 107 + 256
     print(rect)
     im = cv2.imread('../im.jpg')
-    im = get_object(im, rect, size=255, q=0.5)
+    mv = (np.random.random(2) - 0.5) * 2 * 64
+    im = get_object(im, rect, size=255, q=0.5, move=mv)
     cv2.imshow('im', im)
     cv2.waitKey()

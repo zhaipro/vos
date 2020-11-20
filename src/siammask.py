@@ -118,9 +118,9 @@ def refine(features, corr_feature):
     p0, p1, p2 = features
 
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
-    p0 = tf.compat.v1.extract_image_patches(p0, ksizes=(1, 64, 64, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
-    p1 = tf.compat.v1.extract_image_patches(p1, ksizes=(1, 32, 32, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
-    p2 = tf.compat.v1.extract_image_patches(p2, ksizes=(1, 16, 16, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p0 = tf.image.extract_patches(p0, sizes=(1, 64, 64, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p1 = tf.image.extract_patches(p1, sizes=(1, 32, 32, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p2 = tf.image.extract_patches(p2, sizes=(1, 16, 16, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
     p0 = Reshape((64, 64, 64))(p0)
     p1 = Reshape((32, 32, 256))(p1)
@@ -176,7 +176,7 @@ def select_mask_logistic_loss(true, pred):
 
     true = K.reshape(true, (-1, 255, 255, 1))
     print('e', pred.shape, true.shape)
-    true = tf.compat.v1.extract_image_patches(true, ksizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
+    true = tf.image.extract_patches(true, sizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
     print('b', pred.shape, true.shape)
     weight = K.mean(true, axis=-1)
     print('weight.shape:', weight.shape)
@@ -231,7 +231,6 @@ class Dataset:
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
             bbox = utils.find_bbox((im == color).astype('uint8'))
-            assert bbox is not None
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
@@ -250,12 +249,13 @@ class Dataset:
             mask = im == color
             mask.dtype = 'uint8'
             bbox = utils.find_bbox(mask)
-            assert bbox is not None
-            mask = utils.get_object(mask, bbox, 255).astype('float32')
+
+            mv = (np.random.random(2) - 0.5) * 2 * 64
+            mask = utils.get_object(mask, bbox, 255, move=mv).astype('float32')
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
-            search = utils.get_object(im, bbox, 255).astype('float32')
+            search = utils.get_object(im, bbox, 255, move=mv).astype('float32')
 
             if fake:
                 mask[:] = 0
@@ -270,8 +270,6 @@ class Dataset:
             template.shape = (1,) + template.shape
             search.shape = (1,) + search.shape
             mask.shape = (1,) + mask.shape + (1,)
-
-            assert not np.isnan(template.sum())
 
             yield (template, search), mask
 
@@ -294,6 +292,8 @@ def mlearn():
     xy_train = dataset.generator()
     xy_test = dataset.generator(is_train=False)
     model = build_model()
+    # model = keras.models.load_model('weights.023.h5',
+        # {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     model.summary()
     reduce_lr = ReduceLROnPlateau(verbose=1)
     mcp = ModelCheckpoint(filepath='weights.{epoch:03d}.h5')
@@ -315,7 +315,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.003.h5',
+    model = keras.models.load_model('weights.004.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     np.save('masks.npy', masks)
