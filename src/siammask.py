@@ -26,7 +26,7 @@ import resnet
 
 
 def res_down():
-    inputs = Input(shape=(None, None, 3))
+    inputs = Input(shape=(255, 255, 3))
     rn50 = resnet.ResNet50(input_tensor=inputs)
     '''
     for layer in rn50.layers:           # 需要训练吗？
@@ -53,11 +53,22 @@ class DepthwiseConv2D(Layer):
         n, xh, xw, c = x.shape
         x = tf.transpose(x, (1, 2, 0, 3))
         x = K.reshape(x, (1, xh, xw, -1))
+
         n, kh, kw, c = kernel.shape
+        # kernel = K.reshape(kernel, (-1, kh * kw * c))
+        # kernel = K.softmax(kernel)
+        # print('softmax.kernel.shape:', kernel.shape)
+        # kernel = K.reshape(kernel, (-1, kh, kw, c))
+
+        print('kernel.shape:', kernel.shape)
         kernel = tf.transpose(kernel, (1, 2, 0, 3))
         kernel = K.reshape(kernel, (kh, kw, -1, 1))
 
+        print('kernel.shape:', kernel.shape)
+        print('x.shape:', x.shape)
         out = K.depthwise_conv2d(x, kernel)
+
+        print('out.shape:', out.shape)
 
         _, oh, ow, _ = out.shape
         out = K.reshape(out, (oh, ow, -1, c))
@@ -71,24 +82,25 @@ class DepthwiseConv2D(Layer):
 
 def _depth_corr(kernel, search):
     kernel = Conv2D(256, kernel_size=3, use_bias=False)(kernel)
-    kernel = BatchNormalization()(kernel)
-    kernel = Activation('relu')(kernel)
+    kernel = kernel / (tf.norm(kernel) + 1e-8)
+    # kernel = BatchNormalization()(kernel)
+    # kernel = Activation('relu')(kernel)
 
     search = Conv2D(256, kernel_size=3, use_bias=False)(search)
-    search = BatchNormalization()(search)
-    search = Activation('relu')(search)
+    # search = BatchNormalization()(search)
+    # search = Activation('relu')(search)
 
     feature = DepthwiseConv2D()([search, kernel])
     return feature
 
 
 def depth_corr(kernel, search, out_channels):
-    feature = _depth_corr(kernel, search)
-    feature = Conv2D(256, kernel_size=1, use_bias=False, name='conv2d')(feature)
+    corr_feature = _depth_corr(kernel, search)
+    feature = Conv2D(256, kernel_size=1, use_bias=False, name='conv2d')(corr_feature)
     feature = BatchNormalization(name='batchnormalization')(feature)
     feature = Activation('relu')(feature)
     feature = Conv2D(out_channels, kernel_size=1)(feature)
-    return feature
+    return corr_feature, feature
 
 
 def mask_corr(template, search):
@@ -118,24 +130,28 @@ def refine(features, corr_feature):
     p0, p1, p2 = features
 
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
-    p0 = tf.image.extract_patches(p0, sizes=(1, 64, 64, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
-    p1 = tf.image.extract_patches(p1, sizes=(1, 32, 32, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
-    p2 = tf.image.extract_patches(p2, sizes=(1, 16, 16, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p0 = tf.image.extract_patches(p0, sizes=(1, 61, 61, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p1 = tf.image.extract_patches(p1, sizes=(1, 31, 31, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
+    p2 = tf.image.extract_patches(p2, sizes=(1, 15, 15, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
-    p0 = Reshape((64, 64, 64))(p0)
-    p1 = Reshape((32, 32, 256))(p1)
-    p2 = Reshape((16, 16, 512))(p2)
+    p0 = Reshape((61, 61, 64))(p0)
+    p1 = Reshape((31, 31, 256))(p1)
+    p2 = Reshape((15, 15, 512))(p2)
 
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
     p3 = Reshape((1, 1, 256))(corr_feature)
-    out = Conv2DTranspose(32, 16, strides=15)(p3)
-    h2 = Conv2D(32, 3, padding='same', activation='relu')(out)
-    h2 = Conv2D(32, 3, padding='same', activation='relu')(h2)
+    print('pp3.shape', p3.shape)
+    p3 = K.sum(p3, axis=-1, keepdims=True)
+    print('op3.shape', p3.shape)
+    p3 = K.sigmoid(p3)
+    # out = Conv2DTranspose(32, 15, strides=15)(p3)
+    # h2 = Conv2D(32, 3, padding='same', activation='relu')(out)
+    # h2 = Conv2D(32, 3, padding='same', activation='relu')(h2)
     p2 = Conv2D(128, 3, padding='same', activation='relu')(p2)
     p2 = Conv2D(32, 3, padding='same', activation='relu')(p2)
-    print('hahaha:', h2.shape, p2.shape)
-    out = Add()([h2, p2])
-    out = tf.image.resize(out, [32, 32])
+    # print('hahaha:', h2.shape, p2.shape)
+    # out = Add()([h2, p2])
+    out = tf.image.resize(p2, [31, 31])
     out = Conv2D(16, 3, padding='same')(out)
 
     h1 = Conv2D(16, 3, padding='same', activation='relu')(out)
@@ -143,7 +159,7 @@ def refine(features, corr_feature):
     p1 = Conv2D(64, 3, padding='same', activation='relu')(p1)
     p1 = Conv2D(16, 3, padding='same', activation='relu')(p1)
     out = Add()([h1, p1])
-    out = tf.image.resize(out, [64, 64])
+    out = tf.image.resize(out, [61, 61])
     out = Conv2D(4, 3, padding='same')(out)
 
     h0 = Conv2D(4, 3, padding='same', activation='relu')(out)
@@ -155,6 +171,10 @@ def refine(features, corr_feature):
     out = tf.image.resize(out, [127, 127])
     out = Conv2D(1, 3, padding='same')(out)
 
+    print('out and p3', out.shape, p3.shape)
+    out = out * p3
+    # out = Mul(out, p3)
+
     print('out1.shape:', out.shape)
 
     out = Reshape((127 * 127,))(out)
@@ -165,12 +185,39 @@ def refine(features, corr_feature):
 
 
 def select_mask_logistic_loss(true, pred):
-    # return pred
     print('c', pred.shape, true.shape)
     # pred = K.reshape(pred, (-1, 127, 127, 1))
     print('d', pred.shape, true.shape)
     # https://www.tensorflow.org/api_docs/python/tf/image/resize
     # pred = tf.image.resize(pred, [127, 127])
+    print('a', pred.shape, true.shape)
+    pred = K.reshape(pred, (-1, 17, 17, 127 * 127))
+
+    true = K.reshape(true, (-1, 255, 255, 1))
+    print('e', pred.shape, true.shape)
+    true = tf.image.extract_patches(true, sizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
+    print('b', pred.shape, true.shape)
+    # weight = K.mean(true, axis=-1)
+    # print('weight.shape:', weight.shape)
+    # true = (true * 2) - 1
+    # pred = K.tanh(pred)
+    # loss = K.log(1 + K.exp(-pred * true))
+    pred = K.sigmoid(pred)
+    loss = binary_crossentropy(true, pred)
+    # loss = K.mean(loss, axis=-1)
+    # loss = K.mean(loss * weight)
+    # loss = K.sum(loss) / K.sum(weight)
+    # loss = K.log(1 + K.exp(-pred[:, 8, 8] * true[:, 8, 8]))
+    print('loss:', loss.shape)
+    return loss
+
+
+def select_mask_logistic_loss_v1(true, pred):
+    print('c', pred.shape, true.shape)
+    pred = K.reshape(pred, (-1, 63, 63, 1))
+    print('d', pred.shape, true.shape)
+    # https://www.tensorflow.org/api_docs/python/tf/image/resize
+    pred = tf.image.resize(pred, [127, 127])
     print('a', pred.shape, true.shape)
     pred = K.reshape(pred, (-1, 17, 17, 127 * 127))
 
@@ -200,6 +247,7 @@ def build_model():
     template_feature = features(template)[3]
     p0, p1, p2, search_feature = features(search)
     corr_feature = _depth_corr(template_feature, search_feature)
+    # corr_feature, feature = mask_corr(template_feature, search_feature)
     outputs = refine((p0, p1, p2), corr_feature)
     model = Model(inputs=[template, search], outputs=outputs)
     return model
@@ -217,11 +265,24 @@ class Dataset:
         mask.dtype = 'uint8'
         return mask
 
+    @staticmethod
+    def get_weight(mask):
+        w = mask.sum()
+        weight = np.zeros(17 * 17, dtype='float32')
+        for i in range(17 * 17):
+            x = i % 17
+            y = i // 17
+            a = mask[:, y * 8:y * 8 + 127, x * 8:x * 8 + 127].sum() / w
+            weight[i] = a < 0.01 or a > 0.99
+        weight.shape = 1, 17, 17, 1
+        return weight
+
     def _generator(self, is_train):
+        n = int(0.9 * len(self.meta))
         if is_train:
-            meta = self.meta[:-100]
+            meta = self.meta[:n]
         else:
-            meta = self.meta[-100:]
+            meta = self.meta[n:]
         for corps in meta:
             path = corps['path']
             color = corps['color']
@@ -252,7 +313,10 @@ class Dataset:
             mask.dtype = 'uint8'
             bbox = utils.find_bbox(mask)
 
-            mv = (np.random.random(2) - 0.5) * 2 * 64
+            if is_train:
+                mv = (np.random.random(2) - 0.5) * 2 * 64
+            else:
+                mv = 0, 0
             mask = utils.get_object(mask, bbox, 255, move=mv).astype('float32')
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
@@ -273,7 +337,7 @@ class Dataset:
             search.shape = (1,) + search.shape
             mask.shape = (1,) + mask.shape + (1,)
 
-            yield (template, search), mask
+            yield (template, search), mask, self.get_weight(mask)
 
     def generator(self, is_train=True):
         while True:
@@ -302,10 +366,10 @@ def mlearn():
     model.compile(optimizer='rmsprop',
                   loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=1000,
-                        epochs=80,
+                        steps_per_epoch=10000,
+                        epochs=100,
                         validation_data=xy_test,
-                        validation_steps=100,
+                        validation_steps=1000,
                         callbacks=[reduce_lr, mcp])
     model.save(f'weights.{version}.h5', include_optimizer=False)
     result = model.evaluate_generator(xy_test, steps=500)
@@ -317,7 +381,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.004.h5',
+    model = keras.models.load_model('weights.015.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     np.save('masks.npy', masks)

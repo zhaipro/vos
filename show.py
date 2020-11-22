@@ -3,13 +3,13 @@ import numpy as np
 
 
 masks = np.load('masks.npy')
-masks = np.tanh(masks)
-# masks = 1 / (1 + np.exp(-masks))
+# masks = np.tanh(masks)
+masks = 1 / (1 + np.exp(-masks))
 masks.shape = -1, 127, 127
 for i, mask in enumerate(masks):
-    cv2.imwrite(f'mm_masks/{i // 17}_{i % 17}.jpg', (mask + 1) * 127.5)
+    cv2.imwrite(f'mm_masks/{i // 17}_{i % 17}.jpg', (mask + 0) * 255)
 i = masks.sum((1, 2)).argmax()
-print(i)
+print(i // 17, i % 17)
 
 result = np.zeros((255, 255))
 w = np.zeros((255, 255))
