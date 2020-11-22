@@ -1,6 +1,10 @@
+import os
+
 import cv2
 import numpy as np
 
+
+os.makedirs('mm_masks')
 
 masks = np.load('masks.npy')
 # masks = np.tanh(masks)
@@ -15,7 +19,7 @@ result = np.zeros((255, 255))
 w = np.zeros((255, 255))
 for i, mask in enumerate(masks):
     x, y = i % 17, i // 17
-    result[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += (masks[i] + 1) / 2
+    result[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += masks[i]
     w[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += 1
 result /= w
 cv2.imwrite(f'mm_masks/_rr.jpg', result * 255)

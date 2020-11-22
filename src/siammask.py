@@ -26,7 +26,8 @@ import resnet
 
 
 def res_down():
-    inputs = Input(shape=(255, 255, 3))
+    # inputs = Input(shape=(255, 255, 3))
+    inputs = Input(shape=(None, None, 3))
     rn50 = resnet.ResNet50(input_tensor=inputs)
     '''
     for layer in rn50.layers:           # 需要训练吗？
@@ -82,13 +83,13 @@ class DepthwiseConv2D(Layer):
 
 def _depth_corr(kernel, search):
     kernel = Conv2D(256, kernel_size=3, use_bias=False)(kernel)
-    kernel = kernel / (tf.norm(kernel) + 1e-8)
-    # kernel = BatchNormalization()(kernel)
-    # kernel = Activation('relu')(kernel)
+    # kernel = kernel / (tf.norm(kernel) + 1e-8)
+    kernel = BatchNormalization()(kernel)
+    kernel = Activation('relu')(kernel)
 
     search = Conv2D(256, kernel_size=3, use_bias=False)(search)
-    # search = BatchNormalization()(search)
-    # search = Activation('relu')(search)
+    search = BatchNormalization()(search)
+    search = Activation('relu')(search)
 
     feature = DepthwiseConv2D()([search, kernel])
     return feature
@@ -141,17 +142,17 @@ def refine(features, corr_feature):
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
     p3 = Reshape((1, 1, 256))(corr_feature)
     print('pp3.shape', p3.shape)
-    p3 = K.sum(p3, axis=-1, keepdims=True)
-    print('op3.shape', p3.shape)
-    p3 = K.sigmoid(p3)
-    # out = Conv2DTranspose(32, 15, strides=15)(p3)
-    # h2 = Conv2D(32, 3, padding='same', activation='relu')(out)
-    # h2 = Conv2D(32, 3, padding='same', activation='relu')(h2)
+    # p3 = K.sum(p3, axis=-1, keepdims=True)
+    # print('op3.shape', p3.shape)
+    # p3 = K.sigmoid(p3)
+    out = Conv2DTranspose(32, 15, strides=15)(p3)
+    h2 = Conv2D(32, 3, padding='same', activation='relu')(out)
+    h2 = Conv2D(32, 3, padding='same', activation='relu')(h2)
     p2 = Conv2D(128, 3, padding='same', activation='relu')(p2)
     p2 = Conv2D(32, 3, padding='same', activation='relu')(p2)
-    # print('hahaha:', h2.shape, p2.shape)
-    # out = Add()([h2, p2])
-    out = tf.image.resize(p2, [31, 31])
+    print('hahaha:', h2.shape, p2.shape)
+    out = Add()([h2, p2])
+    out = tf.image.resize(out, [31, 31])
     out = Conv2D(16, 3, padding='same')(out)
 
     h1 = Conv2D(16, 3, padding='same', activation='relu')(out)
@@ -171,8 +172,8 @@ def refine(features, corr_feature):
     out = tf.image.resize(out, [127, 127])
     out = Conv2D(1, 3, padding='same')(out)
 
-    print('out and p3', out.shape, p3.shape)
-    out = out * p3
+    # print('out and p3', out.shape, p3.shape)
+    # out = out * p3
     # out = Mul(out, p3)
 
     print('out1.shape:', out.shape)
@@ -279,6 +280,7 @@ class Dataset:
 
     def _generator(self, is_train):
         n = int(0.9 * len(self.meta))
+        print('nnnnnn:', n)
         if is_train:
             meta = self.meta[:n]
         else:
@@ -381,7 +383,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.015.h5',
+    model = keras.models.load_model('weights.003.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     np.save('masks.npy', masks)
