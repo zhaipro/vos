@@ -181,7 +181,6 @@ def refine(features, corr_feature):
 
 
 def select_mask_logistic_loss(true, pred):
-    # soft_margin_loss
     print('c', pred.shape, true.shape)
     # pred = K.reshape(pred, (-1, 127, 127, 1))
     print('d', pred.shape, true.shape)
@@ -199,7 +198,6 @@ def select_mask_logistic_loss(true, pred):
     # true = (true * 2) - 1
     # pred = K.tanh(pred)
     # soft_margin_loss
-    # loss = K.log(1 + K.exp(-pred * true))
     # https://www.tensorflow.org/api_docs/python/tf/math/softplus
     loss = tf.math.softplus(-pred * true)
     # pred = K.sigmoid(pred)
@@ -278,7 +276,10 @@ class Dataset:
         return weight
 
     @staticmethod
-    def preprocess_mask(mask):
+    def preprocess_mask(mask, mv):
+        mx, my = mv
+        mx = 8 + round(mx / 8)
+        my = 8 + round(my / 8)
         # h, w = mask.shape
         weight = mask.sum()
         outputs = np.zeros((17 * 17, 127, 127), dtype='float32')
@@ -287,11 +288,8 @@ class Dataset:
             y = i // 17
             m = mask[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
             a = m.sum() / weight
-            if a > 0.99:
+            if x == mx and y == my:
                 outputs[i] = (m - 0.5) * 2
-                # print(a, weight, outputs[i].min(), outputs[i].max())
-            elif a < 0.01:
-                outputs[i] = -1
             else:
                 outputs[i] = m - 1
         return outputs
@@ -369,7 +367,7 @@ class Dataset:
             search /= 255
             template.shape = (1,) + template.shape
             search.shape = (1,) + search.shape
-            mask = self.preprocess_mask(mask)
+            mask = self.preprocess_mask(mask, mv)
             mask.shape = (1,) + mask.shape
 
             yield (template, search), mask
@@ -402,10 +400,10 @@ def mlearn():
     model.compile(optimizer='rmsprop',
                   loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=10000,
+                        steps_per_epoch=5814,
                         epochs=100,
                         validation_data=xy_test,
-                        validation_steps=1000,
+                        validation_steps=646,
                         callbacks=[reduce_lr, mcp])
     model.save(f'weights.{version}.h5', include_optimizer=False)
     result = model.evaluate_generator(xy_test, steps=500)
@@ -424,9 +422,9 @@ def main(template, search):
 
 
 if __name__ == '__main__':
-    # for _, mask in Dataset().generator(is_train=False):
-    #     np.save('ds_mask.npy', mask)
-    #     exit()
+    for _, mask in Dataset().generator(is_train=False):
+        np.save('ds_mask.npy', mask)
+        exit()
     # model = build_model()
     # model.summary()
     # exit()
