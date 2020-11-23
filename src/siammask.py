@@ -26,13 +26,8 @@ import resnet
 
 
 def res_down():
-    # inputs = Input(shape=(255, 255, 3))
     inputs = Input(shape=(None, None, 3))
     rn50 = resnet.ResNet50(input_tensor=inputs)
-    '''
-    for layer in rn50.layers:           # 需要训练吗？
-        layer.trainable = False
-    '''
     p0 = rn50.get_layer('conv1_relu').output
     p1 = rn50.get_layer('conv2_block3_out').output
     p2 = rn50.get_layer('conv3_block4_out').output
@@ -186,6 +181,7 @@ def refine(features, corr_feature):
 
 
 def select_mask_logistic_loss(true, pred):
+    # soft_margin_loss
     print('c', pred.shape, true.shape)
     # pred = K.reshape(pred, (-1, 127, 127, 1))
     print('d', pred.shape, true.shape)
@@ -194,17 +190,20 @@ def select_mask_logistic_loss(true, pred):
     print('a', pred.shape, true.shape)
     pred = K.reshape(pred, (-1, 17, 17, 127 * 127))
 
-    true = K.reshape(true, (-1, 255, 255, 1))
+    true = K.reshape(true, (-1, 17, 17, 127 * 127))
     print('e', pred.shape, true.shape)
-    true = tf.image.extract_patches(true, sizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
+    # true = tf.image.extract_patches(true, sizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
     print('b', pred.shape, true.shape)
     # weight = K.mean(true, axis=-1)
     # print('weight.shape:', weight.shape)
     # true = (true * 2) - 1
     # pred = K.tanh(pred)
+    # soft_margin_loss
     # loss = K.log(1 + K.exp(-pred * true))
-    pred = K.sigmoid(pred)
-    loss = binary_crossentropy(true, pred)
+    # https://www.tensorflow.org/api_docs/python/tf/math/softplus
+    loss = tf.math.softplus(-pred * true)
+    # pred = K.sigmoid(pred)
+    # loss = binary_crossentropy(true, pred)
     # loss = K.mean(loss, axis=-1)
     # loss = K.mean(loss * weight)
     # loss = K.sum(loss) / K.sum(weight)
@@ -278,6 +277,25 @@ class Dataset:
         weight.shape = 1, 17, 17, 1
         return weight
 
+    @staticmethod
+    def preprocess_mask(mask):
+        # h, w = mask.shape
+        weight = mask.sum()
+        outputs = np.zeros((17 * 17, 127, 127), dtype='float32')
+        for i in range(17 * 17):
+            x = i % 17
+            y = i // 17
+            m = mask[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
+            a = m.sum() / weight
+            if a > 0.99:
+                outputs[i] = (m - 0.5) * 2
+                # print(a, weight, outputs[i].min(), outputs[i].max())
+            elif a < 0.01:
+                outputs[i] = -1
+            else:
+                outputs[i] = m - 1
+        return outputs
+
     def _generator(self, is_train):
         n = int(0.9 * len(self.meta))
         print('nnnnnn:', n)
@@ -299,7 +317,14 @@ class Dataset:
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
-            template = utils.get_object(im, bbox, 127).astype('float32')
+            template = utils.get_object(im, bbox, 127)
+
+            # if random.random() < 0.12:
+            #     grayed = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            #     grayed.shape = grayed.shape + (1,)
+            #     template[:] = grayed
+
+            template = template.astype('float32')
 
             if fake:
                 idx = random.randint(0, len(self.meta) - 1)
@@ -323,7 +348,14 @@ class Dataset:
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
-            search = utils.get_object(im, bbox, 255, move=mv).astype('float32')
+            search = utils.get_object(im, bbox, 255, move=mv)
+
+            # if random.random() < 0.12:
+            #     grayed = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
+            #     grayed.shape = grayed.shape + (1,)
+            #     search[:] = grayed
+
+            search = search.astype('float32')
 
             if fake:
                 mask[:] = 0
@@ -337,9 +369,11 @@ class Dataset:
             search /= 255
             template.shape = (1,) + template.shape
             search.shape = (1,) + search.shape
-            mask.shape = (1,) + mask.shape + (1,)
+            mask = self.preprocess_mask(mask)
+            mask.shape = (1,) + mask.shape
 
-            yield (template, search), mask, self.get_weight(mask)
+            yield (template, search), mask
+            # yield (template, search), mask, self.get_weight(mask)
 
     def generator(self, is_train=True):
         while True:
@@ -383,13 +417,16 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.003.h5',
+    model = keras.models.load_model('weights.002.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     np.save('masks.npy', masks)
 
 
 if __name__ == '__main__':
+    # for _, mask in Dataset().generator(is_train=False):
+    #     np.save('ds_mask.npy', mask)
+    #     exit()
     # model = build_model()
     # model.summary()
     # exit()

@@ -6,7 +6,7 @@ from tensorflow.keras import utils as keras_utils
 
 
 def block1(x, filters, kernel_size=3, stride=1,
-           conv_shortcut=True, name=None):
+           conv_shortcut=True, dilation=1, name=None):
     """A residual block.
 
     # Arguments
@@ -44,7 +44,7 @@ def block1(x, filters, kernel_size=3, stride=1,
 
     padding = 'SAME' if stride == 1 else 'VALID'
     x = layers.Conv2D(filters, kernel_size, strides=stride, padding=padding,
-                      name=name + '_2_conv')(x)
+                      dilation_rate=dilation, name=name + '_2_conv')(x)
     x = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                   name=name + '_2_bn')(x)
     x = layers.Activation('relu', name=name + '_2_relu')(x)
@@ -58,7 +58,7 @@ def block1(x, filters, kernel_size=3, stride=1,
     return x
 
 
-def stack1(x, filters, blocks, stride1=2, name=None):
+def stack1(x, filters, blocks, stride1=2, dilation=1, name=None):
     """A set of stacked residual blocks.
 
     # Arguments
@@ -73,7 +73,8 @@ def stack1(x, filters, blocks, stride1=2, name=None):
     """
     x = block1(x, filters, stride=stride1, name=name + '_block1')
     for i in range(2, blocks + 1):
-        x = block1(x, filters, conv_shortcut=False, name=name + '_block' + str(i))
+        x = block1(x, filters, conv_shortcut=False, dilation=dilation,
+                   name=name + '_block' + str(i))
     return x
 
 
@@ -98,7 +99,7 @@ def ResNet50(input_tensor=None, input_shape=None):
 
     p1 = stack1(x, 64, 3, stride1=1, name='conv2')
     p2 = stack1(p1, 128, 4, stride1=2, name='conv3')
-    p3 = stack1(p2, 256, 6, stride1=1, name='conv4')
+    p3 = stack1(p2, 256, 6, stride1=1, dilation=2, name='conv4')
     p4 = stack1(p3, 512, 3, stride1=1, name='conv5')
     x = p4
 
