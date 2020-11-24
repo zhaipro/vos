@@ -17,6 +17,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Layer
 from tensorflow import keras
 from tensorflow.keras import backend as K
+from tensorflow.keras.optimizers import RMSprop
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
@@ -298,7 +299,7 @@ class Dataset:
 
     def _generator(self, is_train):
         n = int(0.9 * len(self.meta))
-        print('nnnnnn:', n)
+        # print('nnnnnn:', n)
         if is_train:
             meta = self.meta[:n]
         else:
@@ -309,7 +310,11 @@ class Dataset:
             fake = random.random() < 0.3
             fake = False
 
-            frame = random.choice(corps['fns'])
+            if len(corps['fns']) < 2:
+                continue
+            _frame = random.randint(0, len(corps['fns']) - 2)
+            frame = corps['fns'][_frame]
+            # frame = random.choice(corps['fns'] - 1)
             fn = f'train/Annotations/{path}/{frame}.png'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
@@ -317,12 +322,17 @@ class Dataset:
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
-            template = utils.get_object(im, bbox, 127)
 
-            # if random.random() < 0.12:
-            #     grayed = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-            #     grayed.shape = grayed.shape + (1,)
-            #     template[:] = grayed
+            if is_train:
+                mv = (np.random.random(2) - 0.5) * 8
+            else:
+                mv = 0, 0
+            template = utils.get_object(im, bbox, 127, move=mv)
+
+            if is_train and random.random() < 0.12:
+                grayed = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                grayed.shape = grayed.shape + (1,)
+                template[:] = grayed
 
             template = template.astype('float32')
 
@@ -332,7 +342,10 @@ class Dataset:
                 path = corps['path']
                 color = corps['color']
 
-            frame = random.choice(corps['fns'])
+            if is_train:
+                frame = random.choice(corps['fns'])
+            else:
+                frame = corps['fns'][_frame + 1]
             fn = f'train/Annotations/{path}/{frame}.png'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
@@ -350,10 +363,10 @@ class Dataset:
                 im = utils.imdecode(fp)
             search = utils.get_object(im, bbox, 255, move=mv)
 
-            # if random.random() < 0.12:
-            #     grayed = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
-            #     grayed.shape = grayed.shape + (1,)
-            #     search[:] = grayed
+            if is_train and random.random() < 0.12:
+                grayed = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
+                grayed.shape = grayed.shape + (1,)
+                search[:] = grayed
 
             search = search.astype('float32')
 
@@ -399,13 +412,13 @@ def mlearn():
     model.summary()
     reduce_lr = ReduceLROnPlateau(verbose=1)
     mcp = ModelCheckpoint(filepath='weights.{epoch:03d}.h5')
-    model.compile(optimizer='rmsprop',
+    model.compile(optimizer=RMSprop(lr=0.0001),
                   loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=10000,
+                        steps_per_epoch=5814,
                         epochs=100,
                         validation_data=xy_test,
-                        validation_steps=1000,
+                        validation_steps=646,
                         callbacks=[reduce_lr, mcp])
     model.save(f'weights.{version}.h5', include_optimizer=False)
     result = model.evaluate_generator(xy_test, steps=500)
@@ -417,14 +430,15 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.002.h5',
+    model = keras.models.load_model('weights.016.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     np.save('masks.npy', masks)
 
 
 if __name__ == '__main__':
-    # for _, mask in Dataset().generator(is_train=False):
+    # for (template, _), mask in Dataset().generator():
+    #     cv2.imwrite('_template.jpg', template[0] * 255)
     #     np.save('ds_mask.npy', mask)
     #     exit()
     # model = build_model()
