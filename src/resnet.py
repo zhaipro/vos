@@ -24,14 +24,16 @@ def block1(x, filters, kernel_size=3, stride=1,
     bn_axis = 3 if backend.image_data_format() == 'channels_last' else 1
 
     if conv_shortcut is True:
-        if stride == 1:
+        if stride == 1 and dilation == 1:
             shortcut = layers.Conv2D(4 * filters, 1, strides=stride,
                                      name=name + '_0_conv')(x)
             shortcut = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                                  name=name + '_0_bn')(shortcut)
         else:
-            shortcut = layers.Conv2D(4 * filters, 3, strides=stride,
-                                     name=name + '_0_conv')(x)
+            padding = 'SAME' if dilation == 2 else 'VALID'
+            dilation = 1
+            shortcut = layers.Conv2D(4 * filters, 3, strides=stride, padding=padding,
+                                     dilation_rate=dilation, name=name + '_0_conv')(x)
             shortcut = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                                  name=name + '_0_bn')(shortcut)
     else:
@@ -71,7 +73,7 @@ def stack1(x, filters, blocks, stride1=2, dilation=1, name=None):
     # Returns
         Output tensor for the stacked blocks.
     """
-    x = block1(x, filters, stride=stride1, name=name + '_block1')
+    x = block1(x, filters, stride=stride1, dilation=dilation, name=name + '_block1')
     for i in range(2, blocks + 1):
         x = block1(x, filters, conv_shortcut=False, dilation=dilation,
                    name=name + '_block' + str(i))
