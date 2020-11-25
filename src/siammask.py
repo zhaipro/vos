@@ -331,6 +331,10 @@ class Dataset:
             color = corps['color']
             fake = random.random() < 0.3
             fake = False
+            if is_train:
+                flip = random.random() < 0.1
+            else:
+                flip = False
 
             if len(corps['fns']) < 2:
                 continue
@@ -349,7 +353,7 @@ class Dataset:
                 mv = (np.random.random(2) - 0.5) * 8
             else:
                 mv = 0, 0
-            template = utils.get_object(im, bbox, 127, move=mv)
+            template = utils.get_object(im, bbox, 127, move=mv, flip=flip)
 
             if is_train and random.random() < 0.12:
                 grayed = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
@@ -376,7 +380,7 @@ class Dataset:
             bbox = utils.find_bbox(mask)
 
             if is_train:
-                mv = (np.random.random(2) - 0.5) * 2 * 64
+                mv = (np.random.random(2) - 0.5) * 2 * 16   # 64
             else:
                 mv = 0, 0
             mask = utils.get_object(mask, bbox, 255, move=mv).astype('float32')
