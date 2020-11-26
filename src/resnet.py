@@ -1,4 +1,6 @@
 # https://github.com/keras-team/keras-applications/blob/master/keras_applications/resnet_common.py
+# https://github.com/foolwood/SiamMask/blob/master/experiments/siammask_sharp/resnet.py
+# https://github.com/kuangliu/pytorch-cifar/issues/52
 from tensorflow.keras import backend
 from tensorflow.keras import models
 from tensorflow.keras import layers
@@ -25,31 +27,31 @@ def block1(x, filters, kernel_size=3, stride=1,
 
     if conv_shortcut is True:
         if stride == 1:
-            shortcut = layers.Conv2D(4 * filters, 1, strides=stride,
+            shortcut = layers.Conv2D(4 * filters, 1, strides=stride, use_bias=False,
                                      name=name + '_0_conv')(x)
             shortcut = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                                  name=name + '_0_bn')(shortcut)
         else:
-            shortcut = layers.Conv2D(4 * filters, 3, strides=stride,
+            shortcut = layers.Conv2D(4 * filters, 3, strides=stride, use_bias=False,
                                      name=name + '_0_conv')(x)
             shortcut = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                                  name=name + '_0_bn')(shortcut)
     else:
         shortcut = x
 
-    x = layers.Conv2D(filters, 1, name=name + '_1_conv')(x)
+    x = layers.Conv2D(filters, 1, use_bias=False, name=name + '_1_conv')(x)
     x = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                   name=name + '_1_bn')(x)
     x = layers.Activation('relu', name=name + '_1_relu')(x)
 
     padding = 'SAME' if stride == 1 else 'VALID'
     x = layers.Conv2D(filters, kernel_size, strides=stride, padding=padding,
-                      dilation_rate=dilation, name=name + '_2_conv')(x)
+                      dilation_rate=dilation, use_bias=False, name=name + '_2_conv')(x)
     x = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                   name=name + '_2_bn')(x)
     x = layers.Activation('relu', name=name + '_2_relu')(x)
 
-    x = layers.Conv2D(4 * filters, 1, name=name + '_3_conv')(x)
+    x = layers.Conv2D(4 * filters, 1, use_bias=False, name=name + '_3_conv')(x)
     x = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                   name=name + '_3_bn')(x)
 
@@ -91,7 +93,7 @@ def ResNet50(input_tensor=None, input_shape=None):
 
     bn_axis = 3 if backend.image_data_format() == 'channels_last' else 1
 
-    x = layers.Conv2D(64, 7, strides=2, name='conv1_conv')(img_input)
+    x = layers.Conv2D(64, 7, strides=2, use_bias=False, name='conv1_conv')(img_input)
     x = layers.BatchNormalization(axis=bn_axis, epsilon=1.001e-5,
                                   name='conv1_bn')(x)
     p0 = layers.Activation('relu', name='conv1_relu')(x)

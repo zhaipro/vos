@@ -1,3 +1,4 @@
+# http://www.robots.ox.ac.uk/~luca/siamese-fc.html
 import json
 import os
 import sys
@@ -63,6 +64,7 @@ class DepthwiseConv2D(Layer):
 
         print('kernel.shape:', kernel.shape)
         print('x.shape:', x.shape)
+        # https://www.tensorflow.org/api_docs/python/tf/nn/depthwise_conv2d
         out = K.depthwise_conv2d(x, kernel)
 
         print('out.shape:', out.shape)
@@ -131,6 +133,7 @@ def refine(features, corr_feature):
     p0, p1, p2 = features
 
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
+    # https://www.tensorflow.org/api_docs/python/tf/image/extract_patches
     p0 = tf.image.extract_patches(p0, sizes=(1, 61, 61, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
     p1 = tf.image.extract_patches(p1, sizes=(1, 31, 31, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
     p2 = tf.image.extract_patches(p2, sizes=(1, 15, 15, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
@@ -458,7 +461,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.040.h5',
+    model = keras.models.load_model('weights.060.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks, scores = model.predict([template, search])
     np.savez('result.npz', masks=masks, scores=scores)
