@@ -458,10 +458,10 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.003.h5',
+    model = keras.models.load_model('weights.040.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
-    masks = model.predict([template, search])
-    np.save('masks.npy', masks)
+    masks, scores = model.predict([template, search])
+    np.savez('result.npz', masks=masks, scores=scores)
 
 
 if __name__ == '__main__':
