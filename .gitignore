@@ -135,4 +135,5 @@ datasets
 *.mp4
 *.h5
 *.npy
+*.npz
 *.pdf

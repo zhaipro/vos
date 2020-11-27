@@ -46,7 +46,7 @@ def imshow(winname, mat):
     cv2.imshow(winname, mat)
 
 
-def get_object(image, bbox, size=255, q=0.50, move=(0, 0), flip=False):
+def get_object(image, bbox, size=255, q=0.50, move=(0, 0), flip=False, border=0):
     x, y, w, h = corner2center(bbox)
     scaling = 127 / ((w + q * (w + h)) * (h + q * (w + h))) ** 0.5
     x_scaling = scaling
@@ -59,7 +59,7 @@ def get_object(image, bbox, size=255, q=0.50, move=(0, 0), flip=False):
         x_scaling = -x_scaling
     mapping = np.array([[x_scaling, 0, mx],
                         [0, y_scaling, my]], dtype='float')
-    crop = cv2.warpAffine(image, mapping, (size, size), borderValue=image.mean(axis=(0, 1)))
+    crop = cv2.warpAffine(image, mapping, (size, size), borderValue=border)
     return crop
 
 
