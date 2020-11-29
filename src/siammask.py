@@ -268,10 +268,10 @@ def build_model():
     template_feature = features(template)[3]
     p0, p1, p2, search_feature = features(search)
     corr_feature = _depth_corr(template_feature, search_feature)
-    scores = up(template_feature, search_feature)
+    # scores = up(template_feature, search_feature)
     # corr_feature, feature = mask_corr(template_feature, search_feature)
     masks = refine((p0, p1, p2), corr_feature)
-    model = Model(inputs=[template, search], outputs=[masks, scores])
+    model = Model(inputs=[template, search], outputs=masks)
     return model
 
 
@@ -300,33 +300,36 @@ class Dataset:
         return weight
 
     @staticmethod
+    def get_weights():
+        weights = np.zeros((17, 17, 127, 127), dtype='float32')
+        weight = np.zeros((255, 255), dtype='float32')
+        for i in range(17 * 17):
+            x = i % 17
+            y = i // 17
+            weight[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += 1
+        for i in range(17 * 17):
+            x = i % 17
+            y = i // 17
+            127 * 127 * 17 * 17
+            weights[y, x] = weight[y * 8:y * 8 + 127, x * 8:x * 8 + 127] / (17 * 17)
+        return weight * 255 / weight.max(), weights
+
+    @staticmethod
     def preprocess_mask(mask):
-        # h, w = mask.shape
-        weight = mask.sum()
         masks = np.zeros((17 * 17, 127, 127), dtype='float32')
-        scores = np.zeros(17 * 17)
         for i in range(17 * 17):
             x = i % 17
             y = i // 17
             m = mask[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
-            score = m.sum() / weight
-            if score > 0.99:
-                masks[i] = (m - 0.5) * 2
-                scores[i] = 1
-                # print(a, weight, outputs[i].min(), outputs[i].max())
-            elif score < 0.01:
-                masks[i] = -1
-                scores[i] = -1
-            else:
-                masks[i] = m - 1
-                scores[i] = 0
-        return masks, scores
+            masks[i] = (m - 0.5) * 2
+        return masks
 
     def _generator(self, is_train):
         n = int(0.9 * len(self.meta))
         # print('nnnnnn:', n)
         if is_train:
             meta = self.meta[:n]
+            random.shuffle(meta)
         else:
             meta = self.meta[n:]
         for corps in meta:
@@ -353,10 +356,11 @@ class Dataset:
                 im = utils.imdecode(fp)
 
             if is_train:
-                mv = (np.random.random(2) - 0.5) * 8
+                mv = (np.random.random(2) - 0.5) * 2 * 4
             else:
                 mv = 0, 0
-            template = utils.get_object(im, bbox, 127, move=mv, flip=flip)
+            border = im.mean(axis=(0, 1))
+            template = utils.get_object(im, bbox, 127, move=mv, flip=flip, border=border)
 
             if is_train and random.random() < 0.12:
                 grayed = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
@@ -378,19 +382,22 @@ class Dataset:
             fn = f'train/Annotations/{path}/{frame}.png'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
+            _im = im
             mask = im == color
             mask.dtype = 'uint8'
+            _mask = mask
             bbox = utils.find_bbox(mask)
 
             if is_train:
-                mv = (np.random.random(2) - 0.5) * 2 * 16   # 64
+                mv = (np.random.random(2) - 0.5) * 2 * 8   # 64
             else:
                 mv = 0, 0
             mask = utils.get_object(mask, bbox, 255, move=mv).astype('float32')
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
-            search = utils.get_object(im, bbox, 255, move=mv)
+            border = im.mean(axis=(0, 1))
+            search = utils.get_object(im, bbox, 255, move=mv, border=border)
 
             if is_train and random.random() < 0.12:
                 grayed = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
@@ -411,11 +418,15 @@ class Dataset:
             search /= 255
             template.shape = (1,) + template.shape
             search.shape = (1,) + search.shape
-            masks, scores = self.preprocess_mask(mask)
+            try:
+                masks = self.preprocess_mask(mask)
+            except:
+                np.savez('errors.npz', im=_im, mask=_mask)
+                exit()
             masks.shape = (1,) + masks.shape
-            scores.shape = (1,) + scores.shape
+            # scores.shape = (1,) + scores.shape
 
-            yield (template, search), (masks, scores)
+            yield (template, search), masks
             # yield (template, search), mask, self.get_weight(mask)
 
     def generator(self, is_train=True):
@@ -438,13 +449,15 @@ def mlearn():
     xy_test = dataset.generator(is_train=False)
     model = build_model()
     keras.utils.plot_model(model, 'model.png', show_shapes=True)
-    # model = keras.models.load_model('weights.023.h5',
-        # {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
+    '''
+    model = keras.models.load_model('weights.003.h5',
+        {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
+    '''
     model.summary()
     reduce_lr = ReduceLROnPlateau(verbose=1)
     mcp = ModelCheckpoint(filepath='weights.{epoch:03d}.h5')
     model.compile(optimizer=RMSprop(lr=0.0001),
-                  loss=[select_mask_logistic_loss, select_score_logistic_loss])
+                  loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
                         steps_per_epoch=5814,
                         epochs=100,
@@ -461,17 +474,21 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.060.h5',
+    model = keras.models.load_model('weights.039.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
-    masks, scores = model.predict([template, search])
-    np.savez('result.npz', masks=masks, scores=scores)
+    masks = model.predict([template, search])
+    np.savez('result.npz', masks=masks)
 
 
 if __name__ == '__main__':
-    # for (template, _), (masks, scores) in Dataset().generator():
-    #     cv2.imwrite('_template.jpg', template[0] * 255)
-    #     np.save('ds_mask.npy', masks)
-    #     np.save('scores.npy', scores)
+    # weight, weights = Dataset.get_weights()
+    # print(weight.shape, weight.dtype, weight.max())
+    # cv2.imshow('a', weight.astype('uint8'))
+    # cv2.waitKey()
+    # exit()
+    # for (template, search), (masks, scores) in Dataset().generator():
+    #     np.savez('datasets.npz', template=template, search=search,
+    #              masks=masks, scores=scores)
     #     exit()
     # model = build_model()
     # model.summary()
