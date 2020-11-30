@@ -11,6 +11,11 @@ masks = data['masks']
 # masks = np.tanh(masks)
 masks = np.clip(masks, -10, 10)
 masks = 1 / (1 + np.exp(-masks))
+
+print(masks.shape)
+cv2.imwrite('a.jpg', masks[0] * 255)
+exit()
+
 masks.shape = -1, 127, 127
 for i, mask in enumerate(masks):
     cv2.imwrite(f'mm_masks/{i // 17}_{i % 17}.jpg', (mask + 0) * 255)

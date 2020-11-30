@@ -134,28 +134,29 @@ def refine(features, corr_feature):
 
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
     # https://www.tensorflow.org/api_docs/python/tf/image/extract_patches
-    p0 = tf.image.extract_patches(p0, sizes=(1, 61, 61, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
-    p1 = tf.image.extract_patches(p1, sizes=(1, 31, 31, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
-    p2 = tf.image.extract_patches(p2, sizes=(1, 15, 15, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
+    # p0 = tf.image.extract_patches(p0, sizes=(1, 61, 61, 1), strides=[1, 4, 4, 1], rates=[1, 1, 1, 1], padding='VALID')
+    # p1 = tf.image.extract_patches(p1, sizes=(1, 31, 31, 1), strides=[1, 2, 2, 1], rates=[1, 1, 1, 1], padding='VALID')
+    # p2 = tf.image.extract_patches(p2, sizes=(1, 15, 15, 1), strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
-    p0 = Reshape((61, 61, 64))(p0)
-    p1 = Reshape((31, 31, 256))(p1)
-    p2 = Reshape((15, 15, 512))(p2)
+    # p0 = Reshape((127, 127, 64))(p0)
+    # p1 = Reshape((61, 61, 256))(p1)
+    # p2 = Reshape((31, 31, 512))(p2)
 
     print(p0.shape, p1.shape, p2.shape, corr_feature.shape)
-    p3 = Reshape((1, 1, 256))(corr_feature)
+    # p3 = Reshape((1, 1, 256))(corr_feature)
+    p3 = corr_feature
     print('pp3.shape', p3.shape)
     # p3 = K.sum(p3, axis=-1, keepdims=True)
     # print('op3.shape', p3.shape)
     # p3 = K.sigmoid(p3)
-    out = Conv2DTranspose(32, 15, strides=15)(p3)
-    h2 = Conv2D(32, 3, padding='same', activation='relu')(out)
+    out = Conv2DTranspose(128, 15, strides=1)(p3)
+    h2 = Conv2D(64, 3, padding='same', activation='relu')(out)
     h2 = Conv2D(32, 3, padding='same', activation='relu')(h2)
     p2 = Conv2D(128, 3, padding='same', activation='relu')(p2)
     p2 = Conv2D(32, 3, padding='same', activation='relu')(p2)
     print('hahaha:', h2.shape, p2.shape)
     out = Add()([h2, p2])
-    out = tf.image.resize(out, [31, 31])
+    out = tf.image.resize(out, [63, 63])
     out = Conv2D(16, 3, padding='same')(out)
 
     h1 = Conv2D(16, 3, padding='same', activation='relu')(out)
@@ -163,7 +164,7 @@ def refine(features, corr_feature):
     p1 = Conv2D(64, 3, padding='same', activation='relu')(p1)
     p1 = Conv2D(16, 3, padding='same', activation='relu')(p1)
     out = Add()([h1, p1])
-    out = tf.image.resize(out, [61, 61])
+    out = tf.image.resize(out, [125, 125])
     out = Conv2D(4, 3, padding='same')(out)
 
     h0 = Conv2D(4, 3, padding='same', activation='relu')(out)
@@ -172,7 +173,7 @@ def refine(features, corr_feature):
     p0 = Conv2D(4, 3, padding='same', activation='relu')(p0)
     print('hahaha:', h0.shape, p0.shape)
     out = Add()([h0, p0])
-    out = tf.image.resize(out, [127, 127])
+    out = tf.image.resize(out, [255, 255])
     out = Conv2D(1, 3, padding='same')(out)
 
     # print('out and p3', out.shape, p3.shape)
@@ -181,7 +182,7 @@ def refine(features, corr_feature):
 
     print('out1.shape:', out.shape)
 
-    out = Reshape((127 * 127,))(out)
+    # out = Reshape((127 * 127,))(out)
 
     print('out.shape:', out.shape)
 
@@ -196,9 +197,9 @@ def select_mask_logistic_loss(true, pred):
     # https://www.tensorflow.org/api_docs/python/tf/image/resize
     # pred = tf.image.resize(pred, [127, 127])
     print('a', pred.shape, true.shape)
-    pred = K.reshape(pred, (-1, 17, 17, 127 * 127))
+    pred = K.reshape(pred, (-1, 255, 255, 1))
 
-    true = K.reshape(true, (-1, 17, 17, 127 * 127))
+    true = K.reshape(true, (-1, 255, 255, 1))
     print('e', pred.shape, true.shape)
     # true = tf.image.extract_patches(true, sizes=(1, 127, 127, 1), strides=[1, 8, 8, 1], rates=[1, 1, 1, 1], padding='VALID')
     print('b', pred.shape, true.shape)
@@ -316,13 +317,14 @@ class Dataset:
 
     @staticmethod
     def preprocess_mask(mask):
-        masks = np.zeros((17 * 17, 127, 127), dtype='float32')
-        for i in range(17 * 17):
-            x = i % 17
-            y = i // 17
-            m = mask[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
-            masks[i] = (m - 0.5) * 2
-        return masks
+        return (mask - 0.5) * 2
+        # masks = np.zeros((17 * 17, 127, 127), dtype='float32')
+        # for i in range(17 * 17):
+        #     x = i % 17
+        #     y = i // 17
+        #     m = mask[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
+        #     masks[i] = (m - 0.5) * 2
+        # return masks
 
     def _generator(self, is_train):
         n = int(0.9 * len(self.meta))
@@ -423,7 +425,7 @@ class Dataset:
             except:
                 np.savez('errors.npz', im=_im, mask=_mask)
                 exit()
-            masks.shape = (1,) + masks.shape
+            masks.shape = (1,) + masks.shape + (1,)
             # scores.shape = (1,) + scores.shape
 
             yield (template, search), masks
@@ -474,7 +476,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.039.h5',
+    model = keras.models.load_model('weights.001.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     np.savez('result.npz', masks=masks)
