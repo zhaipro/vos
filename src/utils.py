@@ -74,7 +74,8 @@ if __name__ == '__main__':
     rect = 298, 107, 298 + 164, 107 + 256
     print(rect)
     im = cv2.imread('../im.jpg')
-    mv = (np.random.random(2) - 0.5) * 2 * 64
-    im = get_object(im, rect, size=255, q=0.5, move=mv)
+    mv = (np.random.random(2) - 0.5) * 2 * 8
+    mv = 0, 0
+    im = get_object(im, rect, size=255, q=0.55, move=mv)
     cv2.imshow('im', im)
     cv2.waitKey()

@@ -337,16 +337,17 @@ class Dataset:
             color = corps['color']
             fake = random.random() < 0.3
             fake = False
-            if is_train:
-                flip = random.random() < 0.1
-            else:
-                flip = False
+            flip = False
+            # if is_train:
+            #     flip = random.random() < 0.1
+            # else:
+            #     flip = False
 
             if len(corps['fns']) < 2:
                 continue
-            _frame = random.randint(0, len(corps['fns']) - 2)
-            frame = corps['fns'][_frame]
-            # frame = random.choice(corps['fns'] - 1)
+            # _frame = random.randint(0, len(corps['fns']) - 2)
+            # frame = corps['fns'][_frame]
+            frame = random.choice(corps['fns'])
             fn = f'train/Annotations/{path}/{frame}.png'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
@@ -375,29 +376,32 @@ class Dataset:
                 path = corps['path']
                 color = corps['color']
 
-            if is_train:
-                frame = random.choice(corps['fns'])
-            else:
-                frame = corps['fns'][_frame + 1]
+            frame = random.choice(corps['fns'])
+            # if is_train:
+            #     frame = random.choice(corps['fns'])
+            # else:
+            #     frame = corps['fns'][_frame + 1]
             fn = f'train/Annotations/{path}/{frame}.png'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
-            _im = im
+            # _im = im
             mask = im == color
             mask.dtype = 'uint8'
-            _mask = mask
+            # _mask = mask
             bbox = utils.find_bbox(mask)
 
             if is_train:
                 mv = (np.random.random(2) - 0.5) * 2 * 8   # 64
+                q = 0.5 + (random.random() - 0.5) * 0.1
             else:
                 mv = 0, 0
-            mask = utils.get_object(mask, bbox, 255, move=mv).astype('float32')
+                q = 0.5
+            mask = utils.get_object(mask, bbox, 255, move=mv, q=q).astype('float32')
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
             border = im.mean(axis=(0, 1))
-            search = utils.get_object(im, bbox, 255, move=mv, border=border)
+            search = utils.get_object(im, bbox, 255, move=mv, q=q, border=border)
 
             if is_train and random.random() < 0.12:
                 grayed = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
@@ -474,9 +478,10 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.039.h5',
+    model = keras.models.load_model('weights.011.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
+    print(masks.shape)
     np.savez('result.npz', masks=masks)
 
 
