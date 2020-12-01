@@ -361,7 +361,7 @@ class Dataset:
             else:
                 mv = 0, 0
             border = im.mean(axis=(0, 1))
-            template = utils.get_object(im, bbox, 127, move=mv, flip=flip, border=border)
+            template, _ = utils.get_object(im, bbox, 127, move=mv, flip=flip, border=border)
 
             if is_train and random.random() < 0.12:
                 grayed = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
@@ -396,12 +396,12 @@ class Dataset:
             else:
                 mv = 0, 0
                 q = 0.5
-            mask = utils.get_object(mask, bbox, 255, move=mv, q=q).astype('float32')
+            mask = utils.get_object(mask, bbox, 255, move=mv, q=q)[0].astype('float32')
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
             border = im.mean(axis=(0, 1))
-            search = utils.get_object(im, bbox, 255, move=mv, q=q, border=border)
+            search, _ = utils.get_object(im, bbox, 255, move=mv, q=q, border=border)
 
             if is_train and random.random() < 0.12:
                 grayed = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
@@ -478,11 +478,26 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.011.h5',
+    model = keras.models.load_model('weights.077.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     print(masks.shape)
     np.savez('result.npz', masks=masks)
+
+
+def depreprocess(masks):
+    masks = np.clip(masks, -10, 10)
+    masks = 1 / (1 + np.exp(-masks))
+
+    masks.shape = -1, 127, 127
+    result = np.zeros((255, 255))
+    w = np.zeros((255, 255))
+    for i in range(17 * 17):
+        x, y = i % 17, i // 17
+        result[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += masks[i]
+        w[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += 1
+    result /= w
+    return result
 
 
 if __name__ == '__main__':
@@ -491,10 +506,21 @@ if __name__ == '__main__':
     # cv2.imshow('a', weight.astype('uint8'))
     # cv2.waitKey()
     # exit()
-    # for (template, search), (masks, scores) in Dataset().generator():
-    #     np.savez('datasets.npz', template=template, search=search,
-    #              masks=masks, scores=scores)
-    #     exit()
+    os.makedirs('results', exist_ok=True)
+    model = keras.models.load_model('weights.077.h5',
+        {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
+    i = 0
+    for (template, search), masks_true in Dataset().generator(is_train=False):
+        cv2.imwrite(f'results/{i}_template.jpg', template[0] * 255)
+        cv2.imwrite(f'results/{i}_search.jpg', search[0] * 255)
+        masks_prev = model.predict([template, search])
+        masks_true = depreprocess(masks_true)
+        masks_prev = depreprocess(masks_prev)
+        cv2.imwrite(f'results/{i}_mask_true.jpg', masks_true * 255)
+        cv2.imwrite(f'results/{i}_mask_prev.jpg', masks_prev * 255)
+        i += 1
+        if i >= 646:
+            exit()
     # model = build_model()
     # model.summary()
     # exit()
