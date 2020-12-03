@@ -7,6 +7,7 @@ import random
 
 import cv2
 import numpy as np
+from tensorflow.keras.utils import multi_gpu_model
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, concatenate
 from tensorflow.keras.layers import Conv2D, Input, Activation, UpSampling2D, Dropout
@@ -16,8 +17,6 @@ from tensorflow.keras.layers import Conv2DTranspose
 from tensorflow.keras.losses import binary_crossentropy, mean_squared_error
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Layer
-from tensorflow import keras
-from tensorflow.keras import backend as K
 from tensorflow.keras.optimizers import RMSprop
 import tensorflow as tf
 from tensorflow import keras
@@ -189,7 +188,6 @@ def refine(features, corr_feature):
 
 
 def select_mask_logistic_loss(true, pred):
-    # soft_margin_loss
     print('c', pred.shape, true.shape)
     # pred = K.reshape(pred, (-1, 127, 127, 1))
     print('d', pred.shape, true.shape)
@@ -207,7 +205,6 @@ def select_mask_logistic_loss(true, pred):
     # true = (true * 2) - 1
     # pred = K.tanh(pred)
     # soft_margin_loss
-    # loss = K.log(1 + K.exp(-pred * true))
     # https://www.tensorflow.org/api_docs/python/tf/math/softplus
     loss = tf.math.softplus(-pred * true)
     # pred = K.sigmoid(pred)
@@ -250,7 +247,6 @@ def select_mask_logistic_loss_v1(true, pred):
     # print('weight.shape:', weight.shape)
     # true = (true * 2) - 1
     # pred = K.tanh(pred)
-    # loss = K.log(1 + K.exp(-pred * true))
     pred = K.sigmoid(pred)
     loss = binary_crossentropy(true, pred)
     # loss = K.mean(loss, axis=-1)
@@ -281,11 +277,6 @@ class Dataset:
         self.zf = zipfile.ZipFile(fn)
         with open('meta.json') as fp:
             self.meta = json.load(fp)
-
-    def preprocess_inputs(self, mask):
-        mask = (mask == self.colors).all(axis=2)
-        mask.dtype = 'uint8'
-        return mask
 
     @staticmethod
     def get_weight(mask):
@@ -324,9 +315,8 @@ class Dataset:
             masks[i] = (m - 0.5) * 2
         return masks
 
-    def _generator(self, is_train):
+    def __generator(self, is_train):
         n = int(0.9 * len(self.meta))
-        # print('nnnnnn:', n)
         if is_train:
             meta = self.meta[:n]
             random.shuffle(meta)
@@ -351,7 +341,8 @@ class Dataset:
             fn = f'train/Annotations/{path}/{frame}.png'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp, 0)
-            bbox = utils.find_bbox((im == color).astype('uint8'))
+            mask = (im == color).astype('uint8')
+            bbox = utils.find_bbox(mask)
             fn = f'train/JPEGImages/{path}/{frame}.jpg'
             with self.zf.open(fn) as fp:
                 im = utils.imdecode(fp)
@@ -360,8 +351,15 @@ class Dataset:
                 mv = (np.random.random(2) - 0.5) * 2 * 4
             else:
                 mv = 0, 0
+            mv = 0, 0
             border = im.mean(axis=(0, 1))
             template, _ = utils.get_object(im, bbox, 127, move=mv, flip=flip, border=border)
+            # x1, y1, x2, y2 = bbox
+            # mask[y1:y2, x1:x2] = 1
+            # template_mask, _ = utils.get_object(mask, bbox, 127, move=mv, flip=flip)
+            # cv2.imwrite('_template.jpg', template)
+            # cv2.imwrite('_template_mask.jpg', template_mask * 255)
+            # exit()
 
             if is_train and random.random() < 0.12:
                 grayed = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
@@ -413,11 +411,6 @@ class Dataset:
             if fake:
                 mask[:] = 0
 
-            # cv2.imwrite('search.jpg', search)
-            # cv2.imwrite('mask.jpg', mask * 255)
-            # cv2.imwrite('template.jpg', template)
-            # exit()
-
             template /= 255
             search /= 255
             template.shape = (1,) + template.shape
@@ -430,12 +423,30 @@ class Dataset:
             masks.shape = (1,) + masks.shape
             # scores.shape = (1,) + scores.shape
 
+            # template_ex = np.zeros((1, 127, 127, 4), dtype='float32')
+            # template_ex[..., :3] = template
+            # template_ex[..., 3] = template_mask
+            # template_ex[..., 3] -= 0.5
+            # template_ex[..., 3] *= 2.0
+            # search_ex = np.zeros((1, 255, 255, 4), dtype='float32')
+            # search_ex[..., :3] = search
+            # yield (template_ex, search_ex), masks
             yield (template, search), masks
             # yield (template, search), mask, self.get_weight(mask)
 
-    def generator(self, is_train=True):
+    def _generator(self, is_train):
         while True:
-            yield from self._generator(is_train)
+            yield from self.__generator(is_train)
+
+    def generator(self, is_train=True, batch_size=8):
+        templates, searches, masks = [], [], []
+        for (template, search), mask in self._generator(is_train):
+            templates.append(template)
+            searches.append(search)
+            masks.append(mask)
+            if len(templates) == batch_size:
+                yield (np.concatenate(templates), np.concatenate(searches)), np.concatenate(masks)
+                templates, searches, masks = [], [], []
 
     def demo(self):
         for (t, s), m in self.generator():
@@ -446,12 +457,17 @@ class Dataset:
 
 
 def mlearn():
-    version = '1.0.0'
+    version = '1.0.1'
     dataset = Dataset()
     # dataset.demo()
     xy_train = dataset.generator()
     xy_test = dataset.generator(is_train=False)
+
     model = build_model()
+    # with tf.device('/cpu:0'):
+    #     model = build_model()
+    # model_parallel = multi_gpu_model(model, gpus=2)
+
     keras.utils.plot_model(model, 'model.png', show_shapes=True)
     '''
     model = keras.models.load_model('weights.003.h5',
@@ -463,10 +479,10 @@ def mlearn():
     model.compile(optimizer=RMSprop(lr=0.0001),
                   loss=select_mask_logistic_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=5814,
+                        steps_per_epoch=5814 // (8 * 1),
                         epochs=100,
                         validation_data=xy_test,
-                        validation_steps=646,
+                        validation_steps=646 // (8 * 1),
                         callbacks=[reduce_lr, mcp])
     model.save(f'weights.{version}.h5', include_optimizer=False)
     result = model.evaluate_generator(xy_test, steps=500)
@@ -478,7 +494,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.077.h5',
+    model = keras.models.load_model('weights.011.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     print(masks.shape)
@@ -506,21 +522,21 @@ if __name__ == '__main__':
     # cv2.imshow('a', weight.astype('uint8'))
     # cv2.waitKey()
     # exit()
-    os.makedirs('results', exist_ok=True)
-    model = keras.models.load_model('weights.077.h5',
-        {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
-    i = 0
-    for (template, search), masks_true in Dataset().generator(is_train=False):
-        cv2.imwrite(f'results/{i}_template.jpg', template[0] * 255)
-        cv2.imwrite(f'results/{i}_search.jpg', search[0] * 255)
-        masks_prev = model.predict([template, search])
-        masks_true = depreprocess(masks_true)
-        masks_prev = depreprocess(masks_prev)
-        cv2.imwrite(f'results/{i}_mask_true.jpg', masks_true * 255)
-        cv2.imwrite(f'results/{i}_mask_prev.jpg', masks_prev * 255)
-        i += 1
-        if i >= 646:
-            exit()
+    # os.makedirs('results', exist_ok=True)
+    # model = keras.models.load_model('weights.003.h5',
+    #     {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
+    # i = 0
+    # for (template, search), masks_true in Dataset().generator(is_train=False, batch_size=1):
+    #     cv2.imwrite(f'results/{i}_template.jpg', template[0, ..., :3] * 255)
+    #     cv2.imwrite(f'results/{i}_search.jpg', search[0, ..., :3] * 255)
+    #     masks_prev = model.predict([template, search])
+    #     masks_true = depreprocess(masks_true)
+    #     masks_prev = depreprocess(masks_prev)
+    #     cv2.imwrite(f'results/{i}_mask_true.jpg', masks_true * 255)
+    #     cv2.imwrite(f'results/{i}_mask_prev.jpg', masks_prev * 255)
+    #     i += 1
+    #     if i >= 646:
+    #         exit()
     # model = build_model()
     # model.summary()
     # exit()
