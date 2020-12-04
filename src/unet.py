@@ -1,9 +1,9 @@
 import numpy as np
-from keras import backend as K
-from keras.layers import BatchNormalization, MaxPooling2D, concatenate
-from keras.layers import Conv2D, Input, Activation, UpSampling2D, Dropout
-from keras.losses import binary_crossentropy
-from keras.models import Model
+from tensorflow.keras import backend as K
+from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, concatenate
+from tensorflow.keras.layers import Conv2D, Input, Activation, UpSampling2D, Dropout
+from tensorflow.keras.losses import binary_crossentropy
+from tensorflow.keras.models import Model
 
 
 def get_unet_256(input_shape=(None, None, 3),
@@ -156,4 +156,5 @@ def psnr(hr, sr, max_val=1):
 
 
 if __name__ == '__main__':
-    get_unet_256()
+    model = get_unet_256((255, 255, 3))
+    model.summary()

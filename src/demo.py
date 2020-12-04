@@ -4,16 +4,17 @@ import sys
 
 import cv2
 import numpy as np
-from tensorflow.keras.models import Model
+from PIL import Image, ImageDraw, ImageFont
 from tensorflow import keras
+from tensorflow.keras.models import Model
 
 import utils
 import siammask
 
 
 def depreprocess(masks):
-    masks = np.clip(masks, -10, 10)
-    masks = 1 / (1 + np.exp(-masks))
+    # masks = np.clip(masks, -10, 10)
+    # masks = 1 / (1 + np.exp(-masks))
 
     masks.shape = -1, 127, 127
     result = np.zeros((255, 255))
@@ -26,9 +27,18 @@ def depreprocess(masks):
     return result
 
 
-def main():
+def put_text(img, text, xy, fill=(255, 255, 255), size=20):
+    img = Image.fromarray(img)
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype('SourceHanSansCN-Bold.otf', size, encoding='utf-8')
+    draw.text(xy, text, fill, font=font)
+    return np.asarray(img)
+
+
+def main(text):
     fn = 'tennis/00000.jpg'
     rect = 298, 107, 298 + 164, 107 + 256
+    # rect = 348, 220, 348 + 79, 220 + 28
     im = cv2.imread(fn)
     template, scaling = utils.get_object(im, rect, size=127)
     cv2.imwrite('template.jpg', template)
@@ -38,7 +48,7 @@ def main():
     h, w, _ = im.shape
     writer = cv2.VideoWriter('result.mp4', fourcc, 25, (w, h))
 
-    model = keras.models.load_model('weights.077.h5',
+    model = keras.models.load_model('weights.081.h5',
         {'DepthwiseConv2D': siammask.DepthwiseConv2D, 'Reshape': siammask.Reshape},
         compile=False)
 
@@ -48,16 +58,11 @@ def main():
             im = cv2.imread(fn)
             print(fn, im.shape)
             search, scaling = utils.get_object(im, rect, size=255)
-            _search = search
-            # cv2.imwrite(f'search_{i}.jpg', search)
             search = utils.preprocess_input(search)
             masks = model.predict([template, search])
             masks = depreprocess(masks)
-            # cv2.imwrite(f'masks_{i}.jpg', (masks * 255).astype('uint8'))
-            # masks = (masks * 255).astype('uint8')
             print('scaling:', scaling)
             tx1, ty1, tx2, ty2 = utils.find_bbox((masks > 0.2).astype('uint8'))
-            # cv2.imwrite(f'_search_{i}.jpg', _search[ty1:ty2, tx1:tx2])
             scaling = 1 / scaling
             masks = cv2.resize(masks, None, fx=scaling, fy=scaling)
             print('masks.shape', masks.shape)
@@ -85,25 +90,24 @@ def main():
             if y1 < 0:
                 masks = masks[-y1:]
                 y1 = 0
-            if x2 > w:
-                x2 = w
+            x2 = min(w, x2)
             masks = masks[:, :x2 - x1]
-            if y2 > h:
-                y2 = h
+            y2 = min(h, y2)
             masks = masks[:y2 - y1]
-            # x1 = max(0, x1)
-            # y1 = max(0, y1)
-            # x2 = min(w, x2)
-            # y2 = min(h, y2)
             print('aaa:', x1, y1, x2, y2, masks.shape)
-            im[int(y1):int(y2), int(x1):int(x2), 2] = im[int(y1):int(y2), int(x1):int(x2), 2] * (1 - masks) + 255 * masks
+            # im[int(y1):int(y2), int(x1):int(x2), 2] = im[int(y1):int(y2), int(x1):int(x2), 2] * (1 - masks) + 255 * masks
+            _masks = np.zeros((h, w, 1), dtype='float')
+            _masks[y1:y2, x1:x2, 0] = masks
+            _masks = (text > 127) * (1 - _masks)
+            im[:] = im * (1 - _masks) + text * _masks
             writer.write(im)
             # exit()
-    except:
-        pass
+    except Exception as e:
+        print(e)
 
     writer.release()
 
 
 if __name__ == '__main__':
-    main()
+    text = put_text(np.zeros((480, 854, 3), dtype='uint8'), '宅教授', (45, 100), (255, 192, 203), size=250)
+    main(text)

@@ -172,15 +172,15 @@ def refine(features, corr_feature):
     print('hahaha:', h0.shape, p0.shape)
     out = Add()([h0, p0])
     out = tf.image.resize(out, [127, 127])
-    out = Conv2D(1, 3, padding='same')(out)
+    out = Conv2D(1, 3, padding='same', activation='sigmoid')(out)
 
     # print('out and p3', out.shape, p3.shape)
     # out = out * p3
     # out = Mul(out, p3)
 
-    print('out1.shape:', out.shape)
+    # print('out1.shape:', out.shape)
 
-    out = Reshape((127 * 127,))(out)
+    # out = Reshape((127 * 127,))(out)
 
     print('out.shape:', out.shape)
 
@@ -312,7 +312,8 @@ class Dataset:
             x = i % 17
             y = i // 17
             m = mask[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
-            masks[i] = (m - 0.5) * 2
+            # masks[i] = (m - 0.5) * 2
+            masks[i] = m
         return masks
 
     def __generator(self, is_train):
@@ -366,8 +367,6 @@ class Dataset:
                 grayed.shape = grayed.shape + (1,)
                 template[:] = grayed
 
-            template = template.astype('float32')
-
             if fake:
                 idx = random.randint(0, len(self.meta) - 1)
                 corps = self.meta[idx]
@@ -406,15 +405,12 @@ class Dataset:
                 grayed.shape = grayed.shape + (1,)
                 search[:] = grayed
 
-            search = search.astype('float32')
-
             if fake:
                 mask[:] = 0
 
-            template /= 255
-            search /= 255
-            template.shape = (1,) + template.shape
-            search.shape = (1,) + search.shape
+            template = utils.preprocess_input(template)
+            search = utils.preprocess_input(search)
+
             try:
                 masks = self.preprocess_mask(mask)
             except:
@@ -438,7 +434,7 @@ class Dataset:
         while True:
             yield from self.__generator(is_train)
 
-    def generator(self, is_train=True, batch_size=8):
+    def generator(self, is_train=True, batch_size=7):
         templates, searches, masks = [], [], []
         for (template, search), mask in self._generator(is_train):
             templates.append(template)
@@ -454,6 +450,34 @@ class Dataset:
             cv2.imwrite('s.jpg', (s[0] * 255).astype('uint8'))
             cv2.imwrite('m.jpg', (m[0] * 255).astype('uint8'))
             exit()
+
+
+def dice_coeff(y_true, y_pred):
+    # y_pred = K.reshape(y_pred, (-1, 17, 17, 127 * 127))
+    # y_true = K.reshape(y_true, (-1, 17, 17, 127 * 127))
+
+    smooth = 1.
+    intersection = K.sum(y_true * y_pred)
+    score = (2. * intersection + smooth) / (K.sum(y_true) + K.sum(y_pred) + smooth)
+    return score
+
+
+def dice_loss(y_true, y_pred):
+    loss = 1 - dice_coeff(y_true, y_pred)
+    return loss
+
+
+def bce_dice_loss(y_true, y_pred):
+    y_pred = K.reshape(y_pred, (-1, 17, 17, 127 * 127))
+    y_true = K.reshape(y_true, (-1, 17, 17, 127 * 127))
+
+    loss = binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
+    return loss
+
+
+def psnr(hr, sr, max_val=1):
+    mse = K.mean(K.square(hr - sr))
+    return 10.0 / np.log(10) * K.log(max_val ** 2 / mse)
 
 
 def mlearn():
@@ -477,12 +501,12 @@ def mlearn():
     reduce_lr = ReduceLROnPlateau(verbose=1)
     mcp = ModelCheckpoint(filepath='weights.{epoch:03d}.h5')
     model.compile(optimizer=RMSprop(lr=0.0001),
-                  loss=select_mask_logistic_loss)
+                  loss=bce_dice_loss)
     model.fit_generator(xy_train,
-                        steps_per_epoch=5814 // (8 * 1),
+                        steps_per_epoch=5814 // (7 * 1),
                         epochs=100,
                         validation_data=xy_test,
-                        validation_steps=646 // (8 * 1),
+                        validation_steps=646 // (7 * 1),
                         callbacks=[reduce_lr, mcp])
     model.save(f'weights.{version}.h5', include_optimizer=False)
     result = model.evaluate_generator(xy_test, steps=500)
@@ -494,7 +518,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.011.h5',
+    model = keras.models.load_model('weights.074.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks = model.predict([template, search])
     print(masks.shape)
@@ -502,8 +526,8 @@ def main(template, search):
 
 
 def depreprocess(masks):
-    masks = np.clip(masks, -10, 10)
-    masks = 1 / (1 + np.exp(-masks))
+    # masks = np.clip(masks, -10, 10)
+    # masks = 1 / (1 + np.exp(-masks))
 
     masks.shape = -1, 127, 127
     result = np.zeros((255, 255))
@@ -523,7 +547,7 @@ if __name__ == '__main__':
     # cv2.waitKey()
     # exit()
     # os.makedirs('results', exist_ok=True)
-    # model = keras.models.load_model('weights.003.h5',
+    # model = keras.models.load_model('weights.081.h5',
     #     {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     # i = 0
     # for (template, search), masks_true in Dataset().generator(is_train=False, batch_size=1):
@@ -546,3 +570,8 @@ if __name__ == '__main__':
         main(template, search)
     else:
         mlearn()
+
+'''
+Epoch 24/100
+726/726 [==============================] - 741s 1s/step - loss: 0.0781 - val_loss: 0.0839 - lr: 1.0000e-04
+'''
