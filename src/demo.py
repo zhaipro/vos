@@ -12,7 +12,7 @@ import utils
 import siammask
 
 
-def depreprocess(masks):
+def _depreprocess(masks):
     # masks = np.clip(masks, -10, 10)
     # masks = 1 / (1 + np.exp(-masks))
 
@@ -27,6 +27,28 @@ def depreprocess(masks):
     return result
 
 
+def depreprocess_2(masks, scores):
+    masks.shape = -1, 127, 127
+    scores.shape = -1
+    result = np.zeros((255, 255))
+    w = np.zeros((255, 255)) + 1e-7
+    for i in scores.argsort()[-5:]:
+        x, y = i % 17, i // 17
+        print('pos:', x, y, scores[i])
+        result[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += masks[i]
+        w[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += 1
+    result /= w
+    return result
+
+
+def depreprocess(masks, scores):
+    masks.shape = -1, 127, 127
+    result = np.zeros((255, 255))
+    x, y = 8, 8
+    result[y * 8:y * 8 + 127, x * 8:x * 8 + 127] += masks[144]
+    return result
+
+
 def put_text(img, text, xy, fill=(255, 255, 255), size=20):
     img = Image.fromarray(img)
     draw = ImageDraw.Draw(img)
@@ -36,6 +58,7 @@ def put_text(img, text, xy, fill=(255, 255, 255), size=20):
 
 
 def main(text):
+    os.makedirs('tennis_results', exist_ok=True)
     fn = 'tennis/00000.jpg'
     rect = 298, 107, 298 + 164, 107 + 256
     # rect = 348, 220, 348 + 79, 220 + 28
@@ -48,21 +71,26 @@ def main(text):
     h, w, _ = im.shape
     writer = cv2.VideoWriter('result.mp4', fourcc, 25, (w, h))
 
-    model = keras.models.load_model('weights.081.h5',
+    model = keras.models.load_model('weights.100.h5',
         {'DepthwiseConv2D': siammask.DepthwiseConv2D, 'Reshape': siammask.Reshape},
         compile=False)
 
     try:
         for i in range(1, 70):
             fn = f'tennis/{i:05}.jpg'
+            print(fn)
             im = cv2.imread(fn)
             print(fn, im.shape)
             search, scaling = utils.get_object(im, rect, size=255)
             search = utils.preprocess_input(search)
-            masks = model.predict([template, search])
-            masks = depreprocess(masks)
+            masks, scores = model.predict([template, search])
+            masks = depreprocess(masks, scores)
+            cv2.imwrite(f'tennis_results/{i}_masks.jpg', masks * 255)
+            cv2.imwrite(f'tennis_results/{i}_search.jpg', search[0] * 255)
+            # masks = model.predict([template, search])
+            # masks = _depreprocess(masks)
             print('scaling:', scaling)
-            tx1, ty1, tx2, ty2 = utils.find_bbox((masks > 0.2).astype('uint8'))
+            tx1, ty1, tx2, ty2 = utils.find_bbox((masks > 0.20).astype('uint8'))
             scaling = 1 / scaling
             masks = cv2.resize(masks, None, fx=scaling, fy=scaling)
             print('masks.shape', masks.shape)
@@ -103,6 +131,7 @@ def main(text):
             writer.write(im)
             # exit()
     except Exception as e:
+        raise e
         print(e)
 
     writer.release()
