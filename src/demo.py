@@ -109,6 +109,9 @@ def main(text):
             tx2 += cx - scaling * 255 / 2
             ty2 += cy - scaling * 255 / 2
             print('prect:', rect, cx, cy)
+
+            # x1, y1, x2, y2 = rect
+            # rect = int(tx1 * 0.1 + x1 * 0.9), int(ty1 * 0.1 + y1 * 0.9), int(tx2 * 0.1 + x2 * 0.9), int(ty2 * 0.1 + y2 * 0.9)
             rect = tx1, ty1, tx2, ty2
             print('nrect:', rect, cx, cy)
 

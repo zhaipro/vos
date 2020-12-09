@@ -32,7 +32,7 @@ for i, score in enumerate(scores):
     if score < 0.50:
         continue
     x, y = i % 17, i // 17
-    print('score:', scores[i])
+    print(x, y, 'score:', scores[i])
     # r = result[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
     # r[:] = np.maximum(r, masks[i])
     # result[y * 8:y * 8 + 127, x * 8:x * 8 + 127] *= masks[i]

@@ -315,12 +315,12 @@ class Dataset:
         return masks
 
     @staticmethod
-    def preprocess_mask(mask):
+    def preprocess_mask_v1(mask):
         # h, w = mask.shape
         ms, ss = 0, 0
         mask_weight = np.zeros(17 * 17, dtype='float32')
         score_weight = np.zeros(17 * 17, dtype='float32')
-        weight = mask.sum()
+        weight = mask[64:-64, 64:-64].sum()
         masks = np.zeros((17 * 17, 127, 127), dtype='float32')
         scores = np.zeros(17 * 17)
         if weight == 0:
@@ -336,7 +336,7 @@ class Dataset:
             score = m.sum() / weight
             # masks[i] = (m - 0.5) * 2
             # masks[i] = m
-            if score > 0.96:
+            if score > 0.99:
                 masks[i] = m
                 scores[i] = 1
                 score_weight[i] = 1
@@ -358,6 +358,37 @@ class Dataset:
         # score_weight *= 17 * 17 / (ss + 1e-8)
         return masks, scores, (mask_weight, score_weight)
 
+    @staticmethod
+    def preprocess_mask(mask, move):
+        mx, my = move
+        mask_weight = np.zeros(17 * 17, dtype='float32')
+        score_weight = np.zeros(17 * 17, dtype='float32')
+        masks = np.zeros((17 * 17, 127, 127), dtype='float32')
+        scores = np.zeros(17 * 17)
+        if mask.sum() == 0:
+            score_weight[:] = 1
+            mask_weight.shape = 1, 17, 17, 1
+            score_weight.shape = 1, 17, 17, 1
+            return masks, scores, (mask_weight, score_weight)
+        for i in range(17 * 17):
+            x = i % 17
+            y = i // 17
+            m = mask[y * 8:y * 8 + 127, x * 8:x * 8 + 127]
+
+            if abs(x * 8 + 127 / 2 - 127.5 - mx) <= 8 and abs(y * 8 + 127 / 2 - 127.5 - my) <= 8:
+                masks[i] = m
+                scores[i] = 1
+                score_weight[i] = 1
+                mask_weight[i] = 1
+            if abs(x * 8 + 127 / 2 - 127.5 - mx) > 40 or abs(y * 8 + 127 / 2 - 127.5 - my) > 40:
+                score_weight[i] = 1
+
+        mask_weight *= 17 * 17 / (mask_weight.sum() + 1e-8)
+        score_weight *= 17 * 17 / (score_weight.sum() + 1e-8)
+        mask_weight.shape = 1, 17, 17, 1
+        score_weight.shape = 1, 17, 17, 1
+        return masks, scores, (mask_weight, score_weight)
+
     def __generator(self, is_train):
         n = int(0.9 * len(self.meta))
         if is_train:
@@ -368,7 +399,7 @@ class Dataset:
         for corps in meta:
             path = corps['path']
             color = corps['color']
-            fake = random.random() < 0.3
+            fake = random.random() < 0.3 if is_train else False
             # fake = False
             flip = False
             # if is_train:
@@ -454,7 +485,7 @@ class Dataset:
             search = utils.preprocess_input(search)
 
             try:
-                masks, scores, weights = self.preprocess_mask(mask)
+                masks, scores, weights = self.preprocess_mask(mask, move=mv)
             except:
                 np.savez('errors.npz', im=_im, mask=_mask)
                 exit()
@@ -534,13 +565,13 @@ def mlearn():
     xy_train = dataset.generator()
     xy_test = dataset.generator(is_train=False)
 
-    model = build_model()
+    # model = build_model()
     # with tf.device('/cpu:0'):
     #     model = build_model()
     # model_parallel = multi_gpu_model(model, gpus=2)
 
-    # model = keras.models.load_model('weights.001.h5',
-    #     {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
+    model = keras.models.load_model('weights.002.h5',
+        {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     keras.utils.plot_model(model, 'model.png', show_shapes=True)
     # model_parallel.summary()
     model.summary()
@@ -549,6 +580,7 @@ def mlearn():
     model.compile(optimizer=RMSprop(lr=0.0001),
                   # loss=bce_dice_loss)
                   sample_weight_mode='temporal',
+                  # loss_weights=[2, 1],
                   loss=[bce_dice_loss, select_score_logistic_loss])
     model.fit_generator(xy_train,
                         steps_per_epoch=5814 // (7 * 1),
@@ -566,7 +598,7 @@ def main(template, search):
     template = utils.preprocess_input(template)
     search = utils.preprocess_input(search)
     print(template.shape, search.shape)
-    model = keras.models.load_model('weights.054.h5',
+    model = keras.models.load_model('weights.036.h5',
         {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
     masks, scores = model.predict([template, search])
     print(masks.shape)
@@ -597,15 +629,19 @@ if __name__ == '__main__':
     # os.makedirs('results', exist_ok=True)
     # model = keras.models.load_model('weights.081.h5',
     #     {'DepthwiseConv2D': DepthwiseConv2D, 'Reshape': Reshape}, compile=False)
-    # i = 0
-    # for (template, search), masks_true in Dataset().generator(is_train=False, batch_size=1):
-    #     cv2.imwrite(f'results/{i}_template.jpg', template[0, ..., :3] * 255)
-    #     cv2.imwrite(f'results/{i}_search.jpg', search[0, ..., :3] * 255)
+    '''
+    i = 0
+    for (template, search), (masks, scores), (mask_weights, scores_weights) in Dataset().generator(is_train=False, batch_size=1):
+        np.savez('demo.npz', template=template, search=search, masks=masks, scores=scores, mask_weights=mask_weights, score_weights=scores_weights)
+        cv2.imwrite(f'results/{i}_template.jpg', template[0, ..., :3] * 255)
+        cv2.imwrite(f'results/{i}_search.jpg', search[0, ..., :3] * 255)
+    '''
     #     masks_prev = model.predict([template, search])
     #     masks_true = depreprocess(masks_true)
     #     masks_prev = depreprocess(masks_prev)
-    #     cv2.imwrite(f'results/{i}_mask_true.jpg', masks_true * 255)
-    #     cv2.imwrite(f'results/{i}_mask_prev.jpg', masks_prev * 255)
+    #    cv2.imwrite(f'results/{i}_mask_true.jpg', masks_true * 255)
+    #    cv2.imwrite(f'results/{i}_mask_prev.jpg', masks_prev * 255)
+    #    exit()
     #     i += 1
     #     if i >= 646:
     #         exit()
